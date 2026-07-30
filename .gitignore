@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.env
+.env.local
+.scratch/
+# 素材（動画・音声）はリポジトリに入れない。Google Drive同期フォルダに置く。
+content/
+# 認証情報
+*.credentials.json
+service-account*.json
+tokens/
+.selfcheck/
+_fcp7_verify/
+.venv/

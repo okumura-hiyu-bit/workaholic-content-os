@@ -1,0 +1,7 @@
+{
+  "name": "@contentos/feed-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "ポッドキャストRSSフィードを動的生成するCloudflare Worker"
+}

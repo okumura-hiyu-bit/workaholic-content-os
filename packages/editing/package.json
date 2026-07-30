@@ -1,0 +1,13 @@
+{
+  "name": "@contentos/editing",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "素材解析・カメラ切替案・テロップ生成",
+  "exports": {
+    ".": "./src/index.ts",
+    "./types": "./src/types.ts",
+    "./camera-plan": "./src/camera-plan.ts",
+    "./srt": "./src/srt.ts"
+  }
+}

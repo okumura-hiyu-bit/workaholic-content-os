@@ -1,0 +1,29 @@
+{
+  "name": "workaholic-content-os",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "1回の収録から媒体ごとに最適化されたコンテンツをAIが生成・配信する運用システム",
+  "workspaces": [
+    "packages/*",
+    "workers/*",
+    "cli",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "selfcheck": "node --experimental-strip-types cli/src/selfcheck.ts .selfcheck --keep",
+    "verify-fcp7": "node --experimental-strip-types cli/src/verify-fcp7.ts",
+    "pipeline": "node --experimental-strip-types cli/src/pipeline.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

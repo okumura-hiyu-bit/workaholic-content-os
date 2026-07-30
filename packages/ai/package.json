@@ -1,0 +1,13 @@
+{
+  "name": "@contentos/ai",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "AIプロバイダー共通インターフェース・コスト管理・ローカルモード",
+  "exports": {
+    ".": "./src/index.ts",
+    "./provider": "./src/provider.ts",
+    "./cost": "./src/cost.ts",
+    "./local-provider": "./src/local-provider.ts"
+  }
+}

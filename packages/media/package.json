@@ -1,0 +1,15 @@
+{
+  "name": "@contentos/media",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "ffmpeg/ffprobe連携・非破壊の音声補正・文字起こし・キャンセル可能な子プロセス実行",
+  "exports": {
+    ".": "./src/index.ts",
+    "./ffmpeg": "./src/ffmpeg.ts",
+    "./audio-correct": "./src/audio-correct.ts",
+    "./transcribe": "./src/transcribe.ts",
+    "./process": "./src/process.ts",
+    "./audio-checks": "./src/audio-checks.ts"
+  }
+}

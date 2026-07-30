@@ -1,0 +1,10 @@
+{
+  "name": "@contentos/pipeline",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "解析フローのオーケストレーション（実行・進捗・キャンセル・再開・キャッシュ）。React/Electron/DOMに非依存。",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}
