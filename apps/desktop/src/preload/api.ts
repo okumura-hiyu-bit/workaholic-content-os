@@ -1,0 +1,96 @@
+/**
+ * Rendererへ公開するAPIの組み立て。
+ *
+ * ★ここに無いものはRendererから触れない。
+ * 公開するのは下記の6メソッド + 2購読だけ。
+ * ipcRenderer そのもの・fs・child_process・任意コマンド実行・任意パス読み書き・
+ * APIキーは一切公開しない。invoke するチャンネル名もRendererから指定させず、
+ * この層で固定する（チャンネル名を引数で受けると任意チャンネルを叩けてしまう）。
+ *
+ * ★electron を import しない。
+ * ipcRenderer 相当を引数で受け取るので、Electronを起動せずに
+ * 「許可されたAPIだけを公開しているか」「購読解除が効くか」をテストできる。
+ */
+
+import type {
+  CancelPipelineResult,
+  ContentOsDesktopApi,
+  PipelineFinishedEvent,
+  PipelineProgressEvent,
+  PipelineStartResult,
+  ProjectSelectionResult,
+  ReadProjectSummaryResult,
+  StartPipelineRequest,
+} from '../shared/dto.ts';
+import { IPC } from '../shared/ipc.ts';
+
+/** ipcRenderer のうち、この層が使う部分だけ。 */
+export interface IpcBridge {
+  invoke(channel: string, ...args: unknown[]): Promise<unknown>;
+  on(channel: string, listener: (event: unknown, ...args: unknown[]) => void): void;
+  removeListener(
+    channel: string,
+    listener: (event: unknown, ...args: unknown[]) => void,
+  ): void;
+}
+
+/** 公開してよいキーの一覧。テストで完全一致を確認する。 */
+export const ALLOWED_API_KEYS = [
+  'selectProject',
+  'readProjectSummary',
+  'startPipeline',
+  'cancelPipeline',
+  'openProjectFolder',
+  'onPipelineProgress',
+  'onPipelineFinished',
+] as const;
+
+function subscribe<T>(
+  ipc: IpcBridge,
+  channel: string,
+  listener: (payload: T) => void,
+): () => void {
+  // ★IpcRendererEvent（senderを持つ）をRendererへ渡さない。payloadだけ渡す。
+  const wrapped = (_event: unknown, ...args: unknown[]): void => {
+    listener(args[0] as T);
+  };
+  ipc.on(channel, wrapped);
+  return () => {
+    ipc.removeListener(channel, wrapped);
+  };
+}
+
+export function createDesktopApi(ipc: IpcBridge): ContentOsDesktopApi {
+  return {
+    async selectProject() {
+      return (await ipc.invoke(IPC.selectProject)) as ProjectSelectionResult;
+    },
+
+    async readProjectSummary(projectPath: string) {
+      return (await ipc.invoke(
+        IPC.readProjectSummary,
+        projectPath,
+      )) as ReadProjectSummaryResult;
+    },
+
+    async startPipeline(request: StartPipelineRequest) {
+      return (await ipc.invoke(IPC.startPipeline, request)) as PipelineStartResult;
+    },
+
+    async cancelPipeline(runId: string) {
+      return (await ipc.invoke(IPC.cancelPipeline, runId)) as CancelPipelineResult;
+    },
+
+    async openProjectFolder(projectPath: string) {
+      await ipc.invoke(IPC.openProjectFolder, projectPath);
+    },
+
+    onPipelineProgress(listener: (event: PipelineProgressEvent) => void) {
+      return subscribe<PipelineProgressEvent>(ipc, IPC.pipelineProgress, listener);
+    },
+
+    onPipelineFinished(listener: (event: PipelineFinishedEvent) => void) {
+      return subscribe<PipelineFinishedEvent>(ipc, IPC.pipelineFinished, listener);
+    },
+  };
+}

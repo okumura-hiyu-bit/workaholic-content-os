@@ -1,0 +1,29 @@
+{
+  "name": "@contentos/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Electron デスクトップアプリ（解析の実行・進捗表示・中止）",
+  "main": "dist/main/index.cjs",
+  "scripts": {
+    "build:node": "tsup",
+    "build:renderer": "vite build",
+    "build": "npm run build:node && npm run build:renderer",
+    "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit",
+    "start": "electron .",
+    "dev:renderer": "vite"
+  },
+  "dependencies": {
+    "@contentos/core": "*"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@vitejs/plugin-react": "^6.0.5",
+    "electron": "^43.2.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "vite": "^8.2.0",
+    "@contentos/pipeline": "*"
+  }
+}

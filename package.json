@@ -16,9 +16,10 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit",
-    "build": "tsup",
+    "typecheck": "tsc --noEmit && npm run typecheck -w @contentos/desktop",
+    "build": "tsup && npm run build -w @contentos/desktop",
     "verify": "npm run typecheck && npm test && npm run build",
+    "desktop": "npm run start -w @contentos/desktop",
     "selfcheck": "node --experimental-strip-types cli/src/selfcheck.ts .selfcheck --keep",
     "verify-fcp7": "node --experimental-strip-types cli/src/verify-fcp7.ts",
     "pipeline": "node --experimental-strip-types cli/src/pipeline.ts"

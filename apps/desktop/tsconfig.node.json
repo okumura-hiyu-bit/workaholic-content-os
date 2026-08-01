@@ -1,0 +1,9 @@
+{
+  "// メモ": "Main / Preload / 解析専用プロセス / Shared。Node向け。DOMは入れない（画面APIを誤って使わないため）。",
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023"],
+    "types": ["node"]
+  },
+  "include": ["src/main/**/*.ts", "src/preload/**/*.ts", "src/worker/**/*.ts", "src/shared/**/*.ts"]
+}

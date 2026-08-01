@@ -1,6 +1,6 @@
 # CURRENT STATE — 引き継ぎドキュメント
 
-> 作成日: 2026-07-30 / 最終更新: 2026-08-01（Step 1「GUI着手前の土台整理」を反映）。この内容は会話の要約ではなく、**実際のリポジトリ・テスト結果・型チェック結果を根拠に**作成しています。数値は必ず次回セッション側でも再確認してください（本ファイル末尾のコマンド）。
+> 作成日: 2026-07-30 / 最終更新: 2026-08-01（Step 1「土台整理」と Step 2「Electron骨組み + IPC」を反映）。この内容は会話の要約ではなく、**実際のリポジトリ・テスト結果・型チェック結果を根拠に**作成しています。数値は必ず次回セッション側でも再確認してください（本ファイル末尾のコマンド）。
 
 ---
 
@@ -30,16 +30,31 @@ cli                       … 上記を呼び出すだけのターミナル入�
 scripts                    … Pythonブリッジ（faster-whisper呼び出し）
 docs                         … 設計ドキュメント一式（01〜14 + measurements/ + archive/）
 workers/feed                  … （関連プロジェクト）ポッドキャストRSS配信Worker。Content OS本体とは別関心
-tsup.config.ts                 … Electronメインプロセス向けのビルド定義
-dist/                           … ★ビルド生成物。.gitignore済み（Git管理対象外・手で編集しない）
+apps/desktop                   … ★Electronアプリ（Main / Preload / Renderer / Shared / 解析専用プロセス）
+tsup.config.ts                  … Electronメインプロセス向けのビルド定義
+dist/                            … ★ビルド生成物。.gitignore済み（Git管理対象外・手で編集しない）
+```
+
+`apps/desktop` の内訳：
+
+```
+apps/desktop/src/
+├── shared/    … Main・Preload・Rendererが共有する型と契約（DTO / IPCチャンネル / 入力検証 / 工程一覧）
+├── main/      … ウィンドウ生成・IPC・実行管理（排他）・projectRoot解決・構造化ログ
+├── preload/   … contextBridgeで最小APIだけを公開
+├── renderer/  … React。状態遷移は純粋なリデューサに分離してテストする
+└── worker/    … ★解析専用プロセス。dist/pipeline.js を動的importして runPipeline() を実行
 ```
 
 ### 依存方向（★一方向。これを崩さない）
 
 ```
-cli/pipeline.ts ─┐
-                  ├→ packages/pipeline → packages/{editing, media, ai} → packages/core
-（将来）apps/desktop ─┘
+cli/pipeline.ts ─────────────────┐
+                                  ├→ packages/pipeline → packages/{editing, media, ai} → packages/core
+apps/desktop（解析専用プロセス）─┘
+   ※ 解析専用プロセスは静的importではなく、実行時に dist/pipeline.js を動的importする
+
+apps/desktop/main → @contentos/core（project.json の読み書きのみ）
 ```
 
 - `packages/core` は他のどのpackageにも依存しない（末端）。ただし `packages/core/src/project.ts` だけは `packages/editing` を参照する例外的な逆依存を持つ（`build-project.ts` の型 `SyncMode`、および `types.ts` の `CameraShot`・`Speaker`・`Word` 等7つ）。いずれも `import type` のみで、ロジック依存ではない。
@@ -92,13 +107,53 @@ npm run verify    # typecheck → test → build をまとめて実行
 - `tsup.config.ts` がビルドを3パスに分けているのは、複数entryと `.d.ts` 生成を1パスで行うと tsup が宣言のロールアップに失敗するため（entry単体なら成功する）。理由は設定ファイル内のコメントに記載。
 - **型は `dist/` ではなくソースから解決される。** `tsc` は `exports` 経由で `packages/*/src/*.ts` を直接読むため、`npm run typecheck` と `npm test` にビルドは不要（`dist/` が無くても通る）。`dist/` が要るのは「型ストリッピングなしで実行する」場面だけ。
 
-### ★Electronから呼ぶときの必須事項：projectRoot を明示する
+### ★projectRoot の扱い（Electron実装で最も重要な判断）
 
-`scripts/transcribe.py` と `.venv` のパスは `packages/media/src/transcribe.ts` で **`opt.projectRoot ?? process.cwd()`** から解決している。
+`scripts/transcribe.py` と `.venv` のパスは `packages/media/src/transcribe.ts` で **`opt.projectRoot ?? process.cwd()`** から解決している。CLIはリポジトリルートで実行されるため `process.cwd()` で足りていたが、**Electronアプリのcwdはリポジトリルートではない**。
 
-CLIはリポジトリルートで実行されるため `process.cwd()` で問題なかったが、**Electronアプリのcwdはリポジトリルートではない**。GUIから解析を呼ぶときは `projectRoot` を明示的に渡さないと、文字起こし工程がPythonブリッジと仮想環境を見つけられずに失敗する。
+**採用した方式：解析専用プロセスの cwd をリポジトリルートに固定する。**
+
+1. Electron Main が `apps/desktop/src/main/project-root.ts` でリポジトリルートを解決する（環境変数 `CONTENTOS_PROJECT_ROOT` → パッケージ時の resources → `app.getAppPath()` から上へ探索。**`process.cwd()` は一切読まない**）。
+2. `child_process.fork` の `cwd` にその値を渡す（`main/analysis-process.ts`）。
+3. 併せて環境変数 `CONTENTOS_PROJECT_ROOT` と start メッセージの `projectRoot` にも同じ値を入れる。
+
+**なぜ `RunPipelineOptions` 経由で渡さないのか（★重要）**
+
+`runPipeline()` の設定に `projectRoot` を足すのが素直に見えるが、`TranscribeConfig` に項目を足すと `stepConfigSlice('transcribe')`（`packages/pipeline/src/registry.ts`）が `config.transcribe` を丸ごとキャッシュキーに使っているため、**transcribe工程のキャッシュキーが変わる**。結果として CLI（projectRoot未指定）と GUI（指定あり）でキャッシュを共有できなくなり、一番重い文字起こしが両者で二重に走る。これは凍結対象の「キャッシュ方式」の変更にあたるため採用しなかった。
+
+cwd固定なら `packages/*` を一切変更せずに同じ結果が得られる。実際に、GUIで解析したプロジェクトに対して CLI を実行すると**全工程がキャッシュヒットする**ことを確認済み（後述の実機確認⑩）。
 
 なお `import.meta` はコード全体で未使用のため、バンドルしてもモジュール位置に依存したパス解決が壊れることはない（確認済み）。
+
+### Electron の構成（2026-08-01 追加）
+
+**★解析は必ず別プロセスで動かす。** `computeEnvelope` / `estimateOffset` / `syncSources` は同期のCPU集約処理で、ffmpeg・whisperと違って子プロセスに逃げない。メインプロセスで `runPipeline()` を直接呼ぶとウィンドウが固まる。
+
+**採用方式：`child_process.fork`（Electronのバイナリを `ELECTRON_RUN_AS_NODE=1` でNodeとして起動）**
+
+`utilityProcess` ではなく fork を選んだ理由：
+
+| 観点 | fork（採用） | utilityProcess |
+|---|---|---|
+| ESM | `dist/pipeline.js`（ESM）を動的importできる | Electronのバージョン依存 |
+| テスト | 起動関数を差し替えてElectron無しで検証できる（★今回のテスト要件の前提） | Electronランタイム内でしか存在しない |
+| Node依存 | Electron同梱のNodeで動く。利用者のマシンにNode不要 | 同左 |
+| 終了時の後始末 | `before-quit` で明示的に kill（`disposeAll`） | Electronが管理 |
+
+唯一の弱点（Electron側でのライフサイクル自動管理）は、アプリ終了時の明示的な kill で代替している。
+
+**プロセスの責務**
+
+| 層 | 責務 | してはいけないこと |
+|---|---|---|
+| Main | ウィンドウ生成・IPC受付・入力検証・排他・projectRoot解決・構造化ログ | `runPipeline()` を直接実行しない |
+| Preload | `contextBridge` で7つのAPIだけを公開 | `ipcRenderer` / `fs` / `child_process` を渡さない |
+| Renderer | 表示と操作。状態遷移は純粋なリデューサ | Nodeの機能に触れない（tsconfig.web.json が `types: []` で防ぐ） |
+| 解析専用プロセス | `dist/pipeline.js` を動的importして `runPipeline()` を実行 | `packages/*` を相対パスでimportしない |
+
+**Rendererへ渡さないもの**：`technicalMessage`・stack trace・`Error`オブジェクト・`AbortSignal`・関数・APIキー・文字起こし全文・字幕全文。`PipelineError` は `shared/errors.ts` の `toSafeError()` で `SafePipelineError` に落としてから送る。開発者向け情報は `main/logger.ts` の構造化ログにのみ残す。
+
+**二重実行の防止**：`run-pipeline.ts` は変更していない。`main/run-manager.ts` が実行中プロジェクトの `Set` と runId の `Map` を持ち、UIの `disabled` に依存せずMain側で開始要求そのものを拒否する。同じprojectIdなら `PROJECT_ALREADY_RUNNING`、別プロジェクトなら `ALREADY_RUNNING`。中止完了まで再実行不可。解析プロセスが異常終了した場合も `onExit` で必ずロックを解放する。
 
 ---
 
@@ -127,6 +182,23 @@ CLIはリポジトリルートで実行されるため `process.cwd()` で問題
 | 部分実行（fromStep/toStep/onlySteps/force） | `run-pipeline.ts` | テスト＋実機（`--from generate-camera-plan --to generate-premiere-xml`を実行し4/4完了を確認） |
 | CLI（通常出力・--json-progress） | `cli/src/pipeline.ts` | 実機（両モードの出力形式を確認） |
 
+### Electron デスクトップアプリ（2026-08-01 追加）
+
+| 機能 | 実装場所 | 確認状況 |
+|---|---|---|
+| ウィンドウ生成・Electron配線 | `apps/desktop/src/main/index.ts` | 実機（起動・Reactマウントを確認） |
+| Preload（contextBridgeで7APIのみ公開） | `apps/desktop/src/preload/{index,api}.ts` | テスト（8件）＋実機（公開キーと`require`等の不在を確認） |
+| IPCハンドラ（検証・事前チェック・排他の統合） | `apps/desktop/src/main/ipc.ts` | テスト（20件）＋実機 |
+| 入力検証（パス・工程ID・同期モード・runId） | `apps/desktop/src/shared/validate.ts` | テスト（21件）＋実機（不正入力3種の拒否を確認） |
+| project.json の読み取りと拒否 | `apps/desktop/src/main/project.ts` | テスト（16件）＋実機 |
+| projectRoot解決・実行環境の事前チェック | `apps/desktop/src/main/project-root.ts` | テスト（14件）＋実機（`source: 'repo'` で解決） |
+| 実行管理（二重実行防止・中止・異常終了時のロック解放） | `apps/desktop/src/main/run-manager.ts` | テスト（34件）＋実機（二重実行拒否・中止・孤児0件を確認） |
+| 解析専用プロセス（dist/pipeline.js を動的import） | `apps/desktop/src/worker/analysis-worker.ts` | 実機（15工程フルラン・部分実行・文字起こし中の中止） |
+| 安全なエラーDTOへの変換 | `apps/desktop/src/shared/errors.ts` | テスト（6件）＋実機（DTOに`technicalMessage`が無いことを確認） |
+| 画面の状態遷移（未選択/選択済み/解析中/完了/警告/失敗/中止） | `apps/desktop/src/renderer/state.ts` | テスト（23件） |
+| 工程一覧の本体との一致検証 | `apps/desktop/src/shared/steps.ts` | テスト（5件。`@contentos/pipeline` と突き合わせ） |
+| 表示整形（経過時間・進捗率・成果物パスの短縮） | `apps/desktop/src/renderer/format.ts` | テスト（8件） |
+
 ---
 
 ## 4. 重要な設計判断
@@ -153,9 +225,11 @@ $ npm run typecheck
 （エラー0件）
 
 $ npm test
-Test Files  19 passed (19)
-     Tests  462 passed (462)
+Test Files  29 passed (29)
+     Tests  617 passed (617)
 ```
+
+内訳：既存のコア 462件（19ファイル）＋ Electron 155件（10ファイル）。Electronのテストは ffmpeg・faster-whisper を一切起動せず、解析専用プロセスの起動関数を差し替えて検証している。
 
 - **実機smoke testの結果**：`cli/src/pipeline.ts`を実プロジェクト（`project.json`＋実際のffmpeg/whisper）に対して複数回実行し、以下を確認済み。
   - フルラン：15/15完了（0失敗・0警告、修正後）
@@ -181,6 +255,24 @@ Test Files  19 passed (19)
   npm run build
   ```
 - **workspace import 移行後（2026-08-01）に再確認した内容**：型チェック エラー0件、テスト 19ファイル/462件すべてpass（移行前と同一件数）、`npm run pipeline -- --help` が15工程を正常に列挙、`npm run build` 成功。加えて **`--experimental-strip-types` を付けない素の `node` で `dist/pipeline.js`・`dist/core.js` を読み込み、`runPipeline` の取得・15工程の確認・`createProject()`／`resolveProject()` の実行に成功**（＝Electronメインプロセスから解析を呼べることの前提条件を実証済み）。
+- **Electron実機確認（2026-08-01）**：`.selfcheck` のfixtureから作った実プロジェクト（5素材・40秒）に対して、**実際にElectronアプリを起動し、Chrome DevTools Protocol でRendererを操作して**以下を確認した。
+  1. アプリ起動・ウィンドウ生成・Reactのマウント（未選択画面の描画）
+  2. `window.contentOs` が公開しているキーがちょうど7つ（`selectProject` / `readProjectSummary` / `startPipeline` / `cancelPipeline` / `openProjectFolder` / `onPipelineProgress` / `onPipelineFinished`）
+  3. **Rendererから `window.require` / `window.process` / `window.module` / `window.ipcRenderer` がすべて `undefined`**（contextIsolation + sandbox が効いている）
+  4. `readProjectSummary` が案件名・ID・パス・ステータス・素材数・最終更新を返す
+  5. 不正入力の拒否：相対パス・未知の工程ID（`rm -rf /`）・不正なrunId（`../../etc/passwd`）がすべて `INVALID_REQUEST` で拒否され、解析プロセスは起動しない
+  6. 解析開始 → runId 発行 → 進捗イベントがRendererまで届く（`stepId` / `stepLabel` / `stepIndex` / `overallRatio` / `stepRatio` を含む）
+  7. **実行中の再開始が `PROJECT_ALREADY_RUNNING` で拒否される**
+  8. 中止 → `outcome: 'cancelled'` の完了イベント。中止完了後は再実行できる
+  9. **IPCで届いたDTOに `technicalMessage` / 文字起こし全文（`words`）/ `project`（`rootDir`）が含まれない**
+  10. `openProjectFolder` で有効なプロジェクトのFinderが開き、`/etc` や相対パスでは開かない
+  11. 購読解除後は進捗イベントが届かない（0件）
+  12. アプリ終了後に**孤児の解析プロセスが残らない**（0件）
+- **解析専用プロセス単体の実機確認**：Electronバイナリを `ELECTRON_RUN_AS_NODE=1` で起動し、`dist/pipeline.js` を動的importして
+  - 15工程フルラン完走（100秒・成果物14件・`ep999.fcp7.xml` 生成）
+  - 部分実行（`--to sync-media` 相当）4工程を2.9秒で完了
+  - **文字起こし工程の途中での中止**（whisperの子プロセスが停止し、`cancelled: true` で完了報告）
+- **★CLI回帰とキャッシュ共有の確認**：GUIで解析した同じプロジェクトに対して `npm run pipeline -- --project <dir> --to sync-media` を実行すると、**4工程すべてがキャッシュヒットしてスキップされた**。GUIとCLIがキャッシュを共有できている（＝`TranscribeConfig` に `projectRoot` を足さない判断が正しく効いている）ことの実証。
 
 ---
 
@@ -189,11 +281,14 @@ Test Files  19 passed (19)
 - **Premiere ProでのXML実機確認**：`xmllint`での構文妥当性は確認済みだが、実際にPremiere Proで読み込み・素材リンク・マーカー表示・音声トラック構成（原音有効／補正音ミュート）が意図通りかは**未検証**。ユーザー側での検証待ち（`docs/measurements/premiere-check-guide.md`参照）。
 - **長尺の実素材**：これまでの検証は7.5秒（TTS音声）・40秒（合成fixture）のみ。10分規模の実収録での処理時間・メモリ使用量・文字起こし精度は未計測。
 - **実素材での笑い・話者判定精度**：`speaker-detect.ts`の閾値は合成波形（正弦波ベース）でチューニングしたもので、実際の人間の声・実際の笑い声での精度は未確認。
-- **同一プロジェクトの同時実行**：排他制御（ロック機構）は未実装。複数プロセスから同じプロジェクトに対して同時に`runPipeline()`を呼んだ場合の挙動は未定義・未検証。
+- **同一プロジェクトの同時実行**：`packages/pipeline` 側の排他制御（ロック機構）は未実装のまま。Electronアプリ内では `main/run-manager.ts` が防いでいるが、**CLIとGUIを同時に同じプロジェクトへ走らせた場合は防げない**（プロセスをまたぐロックが無いため）。挙動は未定義・未検証。
 - **実際の容量不足・権限エラー**：`PipelineErrors.diskFull`・`PipelineErrors.permissionDenied`はエラーメッセージとして実装済みだが、実際にディスク容量を枯渇させた状態・書き込み権限を剥奪した状態でのテストは未実施。
 - **Gemini / OpenAIの本接続**：`packages/ai`はインターフェース・コスト計算・ローカルモードのみ実装。実際のAPI呼び出し（`GeminiProvider`等）は未実装。
-- **Electron GUI**：`apps/`ディレクトリ自体が未作成。設計（`docs/13-gui-mvp.md`）のみ存在。
 - **低解像度プレビュー生成**：確認画面が必要とする音声のみ／低解像度プレビューの書き出し機能は未実装（設計ドキュメントに記載のみ）。
+- **【Electron】ファイル選択ダイアログ経由のUI操作**：`dialog.showOpenDialog` はOSネイティブのため自動操作できず、**「プロジェクトを選択」ボタンを押してダイアログでファイルを選ぶ経路だけは人手で未確認**。それ以外（情報表示・開始・進捗・中止・完了・フォルダを開く）はCDP経由で実アプリを操作して確認済み。
+- **【Electron】アプリの強制終了（SIGKILL）時の解析プロセス**：`before-quit` 経由の通常終了では解析プロセスが確実に終了することを確認済み（孤児プロセス0件）。ただしSIGKILLでMainが即死した場合、`fork` した解析プロセスが孤児として残る可能性がある（未検証）。
+- **【Electron】パッケージ配布**：`app.isPackaged` の分岐は実装済みだが、実際にアプリをパッケージ化して `resources` から projectRoot を解決する経路は未検証（インストーラは今回のスコープ外）。
+- **【Electron】長時間実行時のUI**：40秒のfixtureで100秒の完走を確認したのみ。10分規模の素材での進捗表示の見え方・メモリは未計測。
 
 ---
 
@@ -210,22 +305,30 @@ Electron GUIの前提となる構成の整理を実施済み。**ロジックの
 
 詳細は「2. 現在のアーキテクチャ」の各サブセクションを参照。
 
-### 次の実装：Electron GUIのMVP（未着手）
+### 完了済み：Step 2 — Electron骨組み + IPC（2026-08-01）
 
-以下は着手順の目安。
+解析の「選択 → 開始 → 進捗 → 中止 → 完了 → フォルダを開く」までを1画面で操作できる最小構成。**`packages/*` のロジックは一切変更していない**（変更は `apps/desktop/` の新規追加と、ルートの `package.json` スクリプトのみ）。
 
-1. Electron + React + TypeScriptの骨組み（`apps/desktop/`を新設）
-2. main / preload / rendererの分離
-3. `contextIsolation: true`
-4. `nodeIntegration: false`
-5. pipeline IPCブリッジ（メインプロセスから`packages/pipeline`の`runPipeline()`を呼ぶ）
-6. `ProgressEvent`のレンダラーへの転送（IPC経由）
-7. `AbortController`による解析中止（レンダラーの「中止」ボタン→メインプロセス→`runPipeline`のsignal）
-8. プロジェクト一覧画面
-9. 素材登録画面
-10. 解析進捗画面
-11. 確認画面（★最も価値が高い画面。字幕・カメラ切替・ショート候補の修正UI）
-12. 書き出し画面
+- Main / Preload / Renderer / Shared DTO / 解析専用プロセス の5層に分離
+- `contextIsolation: true` / `nodeIntegration: false` / `sandbox: true`。Preloadは7つのAPIだけを公開
+- 解析は `child_process.fork` の別プロセスで実行（メインプロセスを塞がない）
+- Rendererからの入力（パス・工程ID・同期モード・runId）をMain側で必ず検証
+- 二重実行防止はElectron層のみで実装（`run-pipeline.ts` は無変更）
+- テスト155件を追加（ffmpeg・faster-whisperは起動しない）
+
+### 次の実装：確認画面（Review）★最も価値が高い
+
+`docs/13-gui-mvp.md` 13.2 ④ に相当。今回作った土台の上に、次を順に作る。
+
+1. **プロジェクト一覧・素材登録画面**（現在は project.json を直接選ぶ方式。素材のドラッグ＆ドロップと役割推測はまだ無い）
+2. **確認画面 — 字幕の修正**（低confidence語の強調表示 → 修正 → `project.edits` にのみ書き込む）
+3. **確認画面 — カメラ切替の修正**
+4. **確認画面 — ショート候補の採否**
+5. **孤立修正・競合修正の表示と再接続UI**（件数は既に完了画面に出している。中身の提示はこれから）
+6. 書き出し画面
+7. AI設定（ローカルモードで配線 → GeminiProvider）
+
+**★確認画面を作るときの注意**：修正の保存は必ず `project.edits` だけを書き換えること（`Project.analysis` は再解析で丸ごと差し替わる領域）。IPCに `edits` 更新用のチャンネルを足す際も、Rendererから届く値をMain側で検証してから `saveProject()` に渡す。
 
 ---
 
@@ -253,13 +356,20 @@ npm run typecheck
 # 5. 全テスト（本ファイル更新時点で 19 files / 462 tests / 全pass）
 npm test
 
-# 6. ビルド（Electron向けJSの生成。dist/ は .gitignore 済み）
+# 6. ビルド（dist/ と apps/desktop/dist/ の生成。どちらも .gitignore 済み）
 npm run build
 
 # 4〜6 をまとめて実行する場合
 npm run verify
 
-# 7. 実機動作確認が必要な場合（ffmpeg・faster-whisperのセットアップ済みが前提）
+# 7. Electronアプリの起動（★事前に npm run build が必要）
+npm run desktop
+# → 解析専用プロセスが dist/pipeline.js を読むため、ビルドしていないと
+#   「解析エンジンがまだビルドされていません」と表示されて開始できない。
+# → リポジトリの場所を明示したい場合は環境変数で指定する：
+#   CONTENTOS_PROJECT_ROOT=/path/to/workaholic-content-os npm run desktop
+
+# 8. 実機動作確認が必要な場合（ffmpeg・faster-whisperのセットアップ済みが前提）
 npm run selfcheck
 # → .selfcheck/検証素材 fixture/ に合成素材が再生成される。
 #   その後 cli/src/pipeline.ts 用の project.json を作れば実機パイプライン検証を再現できる
@@ -274,4 +384,8 @@ npm run selfcheck
 - **既存の人間修正レイヤー（`packages/core/src/resolve.ts`）、パイプライン（`packages/pipeline/src/run-pipeline.ts`）、キャッシュ方式（ハッシュ連鎖によるスキップ判定）を、Electronの都合で書き換えないこと。** GUI側の要求でこれらのコア設計を変えたくなった場合は、まずユーザーに相談する。
 - **GUIから`packages/pipeline`を呼ぶ構造にし、`packages`側から Electron や React を import しないこと。** 依存の向きは常に `apps/desktop → packages/pipeline → packages/{editing,media,ai} → packages/core` の一方向。
 - **パッケージをまたぐ参照に相対パス（`'../../core/src/...'`）を使わないこと。** 必ず workspace import（`@contentos/core/project` 等）を使う。新しいモジュールを他パッケージから参照したくなったら、まず対象の `package.json` の `exports` に追加する。ここを崩すと依存の向きがツールで検出できなくなる。
-- **`dist/` をGitにコミットしないこと。** ビルド生成物であり `.gitignore` 済み。手で編集もしない。
+- **`dist/` をGitにコミットしないこと。** ビルド生成物であり `.gitignore` 済み。手で編集もしない。`apps/desktop/dist/` も同様。
+- **Electronのセキュリティ設定を緩めないこと。** `contextIsolation: true` / `nodeIntegration: false` / `sandbox: true` は固定。Rendererに `ipcRenderer` / `fs` / `child_process` / 任意コマンド実行 / 任意パスの読み書き / APIキーを渡さない。Preloadが公開するAPIを増やすときは `apps/desktop/src/preload/api.ts` の `ALLOWED_API_KEYS` も更新する（テストが完全一致を確認している）。
+- **`runPipeline()` をElectronメインプロセスで直接実行しないこと。** 同期のCPU集約処理でウィンドウが固まる。必ず解析専用プロセス経由にする。
+- **`TranscribeConfig`（`packages/pipeline/src/types.ts`）に項目を足さないこと。** `stepConfigSlice('transcribe')` がこのオブジェクトを丸ごとキャッシュキーにしているため、項目を足すと文字起こしのキャッシュが無効化され、CLIとGUIでキャッシュを共有できなくなる。
+- **Rendererへ `technicalMessage` や stack trace を渡さないこと。** 必ず `toSafeError()` を通す。開発者向け情報は構造化ログにのみ残す。

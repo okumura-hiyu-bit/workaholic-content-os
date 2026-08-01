@@ -1,0 +1,11 @@
+{
+  "// メモ": "Renderer。ブラウザ向け。types に node を入れないので、fs や process を書くと型エラーになる。",
+  "// include について": "shared/** をまとめて含めない。TypeScriptがimportを辿るため、Rendererが実際に使う shared だけが対象になる。node:path を使う shared/validate.ts（Main専用）がここに紛れ込むと型エラーになり、それが境界の検出として機能する。",
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": [],
+    "jsx": "react-jsx"
+  },
+  "include": ["src/renderer/**/*.ts", "src/renderer/**/*.tsx"]
+}
