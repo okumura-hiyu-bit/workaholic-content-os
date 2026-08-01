@@ -6,5 +6,10 @@
   "description": "解析フローのオーケストレーション（実行・進捗・キャンセル・再開・キャッシュ）。React/Electron/DOMに非依存。",
   "exports": {
     ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@contentos/core": "*",
+    "@contentos/editing": "*",
+    "@contentos/media": "*"
   }
 }

@@ -11,14 +11,14 @@
 
 import { join } from 'node:path';
 
-import { correctAudio } from '../../../media/src/audio-correct.ts';
+import { correctAudio } from '@contentos/media/audio-correct';
 import {
   detectClipping,
   detectLevelMismatch,
   detectSilentChannel,
-} from '../../../media/src/audio-checks.ts';
-import { decodeAudioMono } from '../../../media/src/ffmpeg.ts';
-import type { AnalysisCheck } from '../../../core/src/project.ts';
+} from '@contentos/media/audio-checks';
+import { decodeAudioMono } from '@contentos/media/ffmpeg';
+import type { AnalysisCheck } from '@contentos/core/project';
 import { checkAborted } from '../process.ts';
 import type { StepContext, StepDefinition, StepResult } from '../types.ts';
 import { extractedAudioPath } from './extract-audio.ts';

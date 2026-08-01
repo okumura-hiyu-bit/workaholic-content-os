@@ -5,8 +5,8 @@ import type {
   PodcastEpisode,
   PodcastShow,
   Post,
-} from '../../../packages/core/src/types.ts';
-import type { PostStatus } from '../../../packages/core/src/status.ts';
+} from '@contentos/core/types';
+import type { PostStatus } from '@contentos/core/status';
 import {
   applyOp3Prefix,
   escapeXml,

@@ -11,8 +11,8 @@
 
 import { join } from 'node:path';
 
-import { resolveBinary } from '../../../media/src/ffmpeg.ts';
-import { runProcess } from '../../../media/src/process.ts';
+import { resolveBinary } from '@contentos/media/ffmpeg';
+import { runProcess } from '@contentos/media/process';
 import { checkAborted } from '../process.ts';
 import type { StepContext, StepDefinition, StepResult } from '../types.ts';
 

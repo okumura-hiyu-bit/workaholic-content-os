@@ -6,11 +6,11 @@
  * APIに送られる対象になる（文字起こし全文は送らない）。
  */
 
-import type { IdentifiedShortCandidate } from '../../../core/src/project.ts';
+import type { IdentifiedShortCandidate } from '@contentos/core/project';
 import {
   deriveEmphasisPoints,
   extractShortCandidates,
-} from '../../../editing/src/short-candidates.ts';
+} from '@contentos/editing/short-candidates';
 import { readEnvelopeCache } from '../envelope-cache.ts';
 import { PipelineErrors } from '../errors.ts';
 import type { StepContext, StepDefinition, StepResult } from '../types.ts';

@@ -9,8 +9,8 @@ import {
   type AnalysisLayer,
   type Project,
   type ProjectAsset,
-} from '../../core/src/project.ts';
-import { loadProject } from '../../core/src/project-store.ts';
+} from '@contentos/core/project';
+import { loadProject } from '@contentos/core/project-store';
 import { STEP_DEPENDENCIES } from './registry.ts';
 import { runPipeline } from './run-pipeline.ts';
 import { PIPELINE_STEP_IDS, type PipelineStepId, type StepDefinition } from './types.ts';

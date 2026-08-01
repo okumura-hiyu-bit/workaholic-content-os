@@ -13,8 +13,8 @@ import type {
   Project,
   ProjectAsset,
   SyncOffset,
-} from '../../core/src/project.ts';
-import type { SyncMode } from '../../editing/src/build-project.ts';
+} from '@contentos/core/project';
+import type { SyncMode } from '@contentos/editing/build-project';
 
 // ─── 工程ID ────────────────────────────────────────────
 

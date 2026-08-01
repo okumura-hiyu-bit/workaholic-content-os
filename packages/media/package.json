@@ -11,5 +11,8 @@
     "./transcribe": "./src/transcribe.ts",
     "./process": "./src/process.ts",
     "./audio-checks": "./src/audio-checks.ts"
+  },
+  "dependencies": {
+    "@contentos/editing": "*"
   }
 }

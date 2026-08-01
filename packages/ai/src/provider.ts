@@ -10,7 +10,7 @@
  * @see docs/13-gui-mvp.md
  */
 
-import type { Speaker } from '../../editing/src/types.ts';
+import type { Speaker } from '@contentos/editing/types';
 
 // ─── 動作モード ──────────────────────────────────────────
 

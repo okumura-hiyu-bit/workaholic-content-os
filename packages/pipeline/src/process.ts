@@ -3,4 +3,4 @@
  * どちらの呼び出しにも使う、media側の関心事のため）。pipeline はそれを
  * re-export するだけで、実装を重複させない。
  */
-export * from '../../media/src/process.ts';
+export * from '@contentos/media/process';

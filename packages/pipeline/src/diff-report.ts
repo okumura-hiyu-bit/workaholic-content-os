@@ -8,8 +8,8 @@
  * @see docs/14-pipeline.md
  */
 
-import { resolveProject } from '../../core/src/resolve.ts';
-import type { AnalysisLayer, EditsLayer } from '../../core/src/project.ts';
+import { resolveProject } from '@contentos/core/resolve';
+import type { AnalysisLayer, EditsLayer } from '@contentos/core/project';
 import { canonicalize } from './hash.ts';
 import type {
   ConflictedEditReport,

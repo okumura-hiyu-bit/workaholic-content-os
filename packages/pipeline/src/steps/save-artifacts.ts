@@ -10,9 +10,9 @@
 
 import { join } from 'node:path';
 
-import { resolveProject } from '../../../core/src/resolve.ts';
-import { renderSrt, generateEmphasisSrt, generateYoutubeChapters } from '../../../editing/src/srt.ts';
-import type { SrtCue } from '../../../editing/src/srt.ts';
+import { resolveProject } from '@contentos/core/resolve';
+import { renderSrt, generateEmphasisSrt, generateYoutubeChapters } from '@contentos/editing/srt';
+import type { SrtCue } from '@contentos/editing/srt';
 import { writeManagedArtifact } from '../paths.ts';
 import type { StepContext, StepDefinition, StepResult } from '../types.ts';
 

@@ -5,9 +5,9 @@
  * 低confidence語はキューに保持し、確認画面で赤字表示できるようにする。
  */
 
-import { subtitleId, type IdentifiedSubtitleCue } from '../../../core/src/project.ts';
-import { buildSubtitleCues } from '../../../editing/src/srt.ts';
-import { assignSpeakers, lowConfidenceWords } from '../../../media/src/transcribe.ts';
+import { subtitleId, type IdentifiedSubtitleCue } from '@contentos/core/project';
+import { buildSubtitleCues } from '@contentos/editing/srt';
+import { assignSpeakers, lowConfidenceWords } from '@contentos/media/transcribe';
 import type { StepContext, StepDefinition, StepResult } from '../types.ts';
 
 const LOW_CONFIDENCE_THRESHOLD = 0.5;

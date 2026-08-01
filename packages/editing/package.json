@@ -8,6 +8,11 @@
     ".": "./src/index.ts",
     "./types": "./src/types.ts",
     "./camera-plan": "./src/camera-plan.ts",
-    "./srt": "./src/srt.ts"
+    "./srt": "./src/srt.ts",
+    "./fcp7xml": "./src/fcp7xml.ts",
+    "./build-project": "./src/build-project.ts",
+    "./audio-sync": "./src/audio-sync.ts",
+    "./speaker-detect": "./src/speaker-detect.ts",
+    "./short-candidates": "./src/short-candidates.ts"
   }
 }

@@ -1,6 +1,6 @@
 # CURRENT STATE — 引き継ぎドキュメント
 
-> 作成日: 2026-07-30。この内容は会話の要約ではなく、**実際のリポジトリ・テスト結果・型チェック結果を根拠に**作成しています。数値は必ず次回セッション側でも再確認してください（本ファイル末尾のコマンド）。
+> 作成日: 2026-07-30 / 最終更新: 2026-08-01（Step 1「GUI着手前の土台整理」を反映）。この内容は会話の要約ではなく、**実際のリポジトリ・テスト結果・型チェック結果を根拠に**作成しています。数値は必ず次回セッション側でも再確認してください（本ファイル末尾のコマンド）。
 
 ---
 
@@ -30,6 +30,8 @@ cli                       … 上記を呼び出すだけのターミナル入�
 scripts                    … Pythonブリッジ（faster-whisper呼び出し）
 docs                         … 設計ドキュメント一式（01〜14 + measurements/ + archive/）
 workers/feed                  … （関連プロジェクト）ポッドキャストRSS配信Worker。Content OS本体とは別関心
+tsup.config.ts                 … Electronメインプロセス向けのビルド定義
+dist/                           … ★ビルド生成物。.gitignore済み（Git管理対象外・手で編集しない）
 ```
 
 ### 依存方向（★一方向。これを崩さない）
@@ -40,9 +42,63 @@ cli/pipeline.ts ─┐
 （将来）apps/desktop ─┘
 ```
 
-- `packages/core` は他のどのpackageにも依存しない（末端）。`packages/editing/build-project.ts` の型 `SyncMode` だけを `packages/core/project.ts` が参照する例外的な逆依存が1箇所あるが、これは型のみの参照でロジック依存ではない。
+- `packages/core` は他のどのpackageにも依存しない（末端）。ただし `packages/core/src/project.ts` だけは `packages/editing` を参照する例外的な逆依存を持つ（`build-project.ts` の型 `SyncMode`、および `types.ts` の `CameraShot`・`Speaker`・`Word` 等7つ）。いずれも `import type` のみで、ロジック依存ではない。
 - `packages/pipeline` は React・Electron・DOM を一切importしない（`packages/pipeline/src/index.ts` のコメントに明記）。CLIからも将来のElectronメインプロセスからも同じ関数（`runPipeline()`）を呼ぶだけで完結する。
 - `packages/ai` は現状どの実行フローからも呼ばれていない（コスト管理・ローカルモードの型とロジックのみ実装済み。パイプラインへの配線は未実施）。
+
+### パッケージ間の参照方法（★2026-08-01 変更。GUI着手前の土台整理）
+
+パッケージをまたぐ参照は **workspace import（`@contentos/*`）に統一**した。以前の相対パス越境（`'../../core/src/project.ts'`）は全廃してある。
+
+```ts
+// ✅ 現在の書き方
+import type { Project } from '@contentos/core/project';
+import { renderSrt } from '@contentos/editing/srt';
+import { runPipeline } from '@contentos/pipeline';
+
+// ❌ 以前の書き方（もう存在しない。復活させないこと）
+import type { Project } from '../../core/src/project.ts';
+```
+
+- 同一パッケージ内の参照は従来どおり相対パス＋`.ts`拡張子（`'./diff-report.ts'`）のまま。**変えるのはパッケージをまたぐときだけ。**
+- 各 `package.json` の `exports` には**実際に他パッケージから使われるモジュールだけ**を列挙している。未公開のサブパスへのディープimportは型・実行時の両方で失敗する（`tsc: TS2307` / `node: ERR_PACKAGE_PATH_NOT_EXPORTED`）。**依存の向きが規約ではなく構造で守られている**ので、新しい参照を足したくなったら `exports` に追加してから使うこと。
+- `dependencies` は実際の依存に合わせて宣言済み（循環なし）。
+
+```
+editing → （依存なし）
+core / media / ai → editing（いずれも型のみ）
+pipeline → core, editing, media
+cli → core, editing, media, pipeline
+feed-worker → core
+```
+
+### ビルド（Electronメインプロセス向け）
+
+CLIは `node --experimental-strip-types` でTypeScriptを直接実行できるが、**Electronのメインプロセスではこの方法が使えない**。そのため `tsup` で通常のJavaScriptに変換したものを `dist/` に出力する。
+
+```bash
+npm run build     # tsup。dist/ に出力
+npm run verify    # typecheck → test → build をまとめて実行
+```
+
+| 出力 | 中身 |
+|---|---|
+| `dist/pipeline.js` + `.d.ts` | `runPipeline()` ほか。CLIとGUIが共用する唯一の解析入口 |
+| `dist/core.js` + `.d.ts` | プロジェクトの読み書き・3レイヤー統合（確認画面が使う） |
+| `dist/chunk-*.js` | 上記2つの共有部分。coreが二重に入らないよう切り出したもの |
+
+- **形式はESMのみ**（`packages/*` はすべて `"type": "module"` のため）。CJSが必要になったら `tsup.config.ts` の `format` に追加する。
+- **`dist/` は生成物。`.gitignore` 済みでGit管理対象外**。手で編集せず、必要なときに `npm run build` で作り直す。
+- `tsup.config.ts` がビルドを3パスに分けているのは、複数entryと `.d.ts` 生成を1パスで行うと tsup が宣言のロールアップに失敗するため（entry単体なら成功する）。理由は設定ファイル内のコメントに記載。
+- **型は `dist/` ではなくソースから解決される。** `tsc` は `exports` 経由で `packages/*/src/*.ts` を直接読むため、`npm run typecheck` と `npm test` にビルドは不要（`dist/` が無くても通る）。`dist/` が要るのは「型ストリッピングなしで実行する」場面だけ。
+
+### ★Electronから呼ぶときの必須事項：projectRoot を明示する
+
+`scripts/transcribe.py` と `.venv` のパスは `packages/media/src/transcribe.ts` で **`opt.projectRoot ?? process.cwd()`** から解決している。
+
+CLIはリポジトリルートで実行されるため `process.cwd()` で問題なかったが、**Electronアプリのcwdはリポジトリルートではない**。GUIから解析を呼ぶときは `projectRoot` を明示的に渡さないと、文字起こし工程がPythonブリッジと仮想環境を見つけられずに失敗する。
+
+なお `import.meta` はコード全体で未使用のため、バンドルしてもモジュール位置に依存したパス解決が壊れることはない（確認済み）。
 
 ---
 
@@ -122,7 +178,9 @@ Test Files  19 passed (19)
   npm run pipeline -- --project <projectDir> --json-progress
   npm run pipeline -- --help
   npm run selfcheck
+  npm run build
   ```
+- **workspace import 移行後（2026-08-01）に再確認した内容**：型チェック エラー0件、テスト 19ファイル/462件すべてpass（移行前と同一件数）、`npm run pipeline -- --help` が15工程を正常に列挙、`npm run build` 成功。加えて **`--experimental-strip-types` を付けない素の `node` で `dist/pipeline.js`・`dist/core.js` を読み込み、`runPipeline` の取得・15工程の確認・`createProject()`／`resolveProject()` の実行に成功**（＝Electronメインプロセスから解析を呼べることの前提条件を実証済み）。
 
 ---
 
@@ -139,9 +197,22 @@ Test Files  19 passed (19)
 
 ---
 
-## 7. 次のタスク（次回セッションで着手。今回は未着手）
+## 7. 次のタスク
 
-次の実装は **Electron GUIのMVP**。以下は着手順の目安であり、今回のセッションでは一切実装していない。
+### 完了済み：Step 1 — GUI着手前の土台整理（2026-08-01）
+
+Electron GUIの前提となる構成の整理を実施済み。**ロジックの変更は一切なし**（変更したソース72箇所はすべてimport指定子の文字列のみ）。
+
+- クロスパッケージの相対パス越境を全廃し、workspace import（`@contentos/*`）へ移行
+- 各 `package.json` の `exports` と `dependencies` を実態に合わせて整理（依存の向きが構造で強制される状態に）
+- `tsup` によるビルド方式を整備し、素の `node` で `dist/` が動作することを実証
+- 型チェック エラー0件・テスト462件すべてpassを維持
+
+詳細は「2. 現在のアーキテクチャ」の各サブセクションを参照。
+
+### 次の実装：Electron GUIのMVP（未着手）
+
+以下は着手順の目安。
 
 1. Electron + React + TypeScriptの骨組み（`apps/desktop/`を新設）
 2. main / preload / rendererの分離
@@ -160,25 +231,35 @@ Test Files  19 passed (19)
 
 ## 8. 次回セッション開始時の確認コマンド
 
-⚠️ **このリポジトリは現在 git 管理下にありません**（`git status`は`fatal: not a git repository`になる）。`git`コマンドを使う場合は、まず`git init`するかどうかをユーザーに確認すること（無断で初期化しない）。以下はgit以外の確認を先に、gitは条件付きで実行する形にしてある。
+⚠️ **このリポジトリは git 管理下にある**（2026-08-01 時点。ブランチ `master`）。ただし**親ディレクトリ `Cloude Code ファイル/` 自体も別のgitリポジトリ**（ブランチ `main`・コミット0件）になっており、リポジトリが入れ子になっている。gitコマンドを打つ前に、必ず `workaholic-content-os/` に `cd` してから実行し、対象リポジトリを取り違えないこと。
 
 ```bash
-# 1. 作業ディレクトリの確認
+# 1. 作業ディレクトリの確認（★親も別リポジトリなので必ずcdする）
 cd "/Users/kishimototaishi/Desktop/Cloude Code ファイル/workaholic-content-os"
 
-# 2. git管理下かどうかの確認（管理下でなければ以降のgitコマンドは無意味）
-git status 2>&1 || echo "→ gitリポジトリではありません。git initが必要か、まずユーザーに確認してください。"
+# 2. リポジトリと変更差分の確認
+git status
+git log --oneline -5
+git diff --stat
 
-# 3. （gitリポジトリだった場合のみ）変更差分の確認
-git diff --stat 2>&1
+# 3. 依存の導入（workspace のシンボリックリンクを張るため、clone直後は必須）
+npm install
+# → node_modules/@contentos/* が packages/* へのシンボリックリンクとして作られる。
+#   これが無いと @contentos/* の import が解決できず、型チェックもテストも通らない。
 
 # 4. 型チェック（エラー0件が正常）
 npm run typecheck
 
-# 5. 全テスト（本ファイル作成時点で 19 files / 462 tests / 全pass）
+# 5. 全テスト（本ファイル更新時点で 19 files / 462 tests / 全pass）
 npm test
 
-# 6. 実機動作確認が必要な場合（ffmpeg・faster-whisperのセットアップ済みが前提）
+# 6. ビルド（Electron向けJSの生成。dist/ は .gitignore 済み）
+npm run build
+
+# 4〜6 をまとめて実行する場合
+npm run verify
+
+# 7. 実機動作確認が必要な場合（ffmpeg・faster-whisperのセットアップ済みが前提）
 npm run selfcheck
 # → .selfcheck/検証素材 fixture/ に合成素材が再生成される。
 #   その後 cli/src/pipeline.ts 用の project.json を作れば実機パイプライン検証を再現できる
@@ -192,3 +273,5 @@ npm run selfcheck
 - **Premiere実機検証が終わるまで、既存のFCP7 XML生成方式（`packages/editing/src/fcp7xml.ts`・`build-project.ts`）を大幅に変更しないこと。** 検証結果が届くまでは構造を維持する。
 - **既存の人間修正レイヤー（`packages/core/src/resolve.ts`）、パイプライン（`packages/pipeline/src/run-pipeline.ts`）、キャッシュ方式（ハッシュ連鎖によるスキップ判定）を、Electronの都合で書き換えないこと。** GUI側の要求でこれらのコア設計を変えたくなった場合は、まずユーザーに相談する。
 - **GUIから`packages/pipeline`を呼ぶ構造にし、`packages`側から Electron や React を import しないこと。** 依存の向きは常に `apps/desktop → packages/pipeline → packages/{editing,media,ai} → packages/core` の一方向。
+- **パッケージをまたぐ参照に相対パス（`'../../core/src/...'`）を使わないこと。** 必ず workspace import（`@contentos/core/project` 等）を使う。新しいモジュールを他パッケージから参照したくなったら、まず対象の `package.json` の `exports` に追加する。ここを崩すと依存の向きがツールで検出できなくなる。
+- **`dist/` をGitにコミットしないこと。** ビルド生成物であり `.gitignore` 済み。手で編集もしない。

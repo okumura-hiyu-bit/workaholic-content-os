@@ -9,5 +9,8 @@
     "./provider": "./src/provider.ts",
     "./cost": "./src/cost.ts",
     "./local-provider": "./src/local-provider.ts"
+  },
+  "dependencies": {
+    "@contentos/editing": "*"
   }
 }

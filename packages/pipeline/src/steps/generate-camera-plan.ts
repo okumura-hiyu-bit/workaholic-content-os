@@ -5,9 +5,9 @@
  * ★沈黙を理由にした切替は行わない（camera-plan.ts 側の原則）。
  */
 
-import { cameraShotId, type IdentifiedCameraShot } from '../../../core/src/project.ts';
-import { planCameraSwitches } from '../../../editing/src/camera-plan.ts';
-import type { CameraSource } from '../../../editing/src/types.ts';
+import { cameraShotId, type IdentifiedCameraShot } from '@contentos/core/project';
+import { planCameraSwitches } from '@contentos/editing/camera-plan';
+import type { CameraSource } from '@contentos/editing/types';
 import { PipelineErrors } from '../errors.ts';
 import type { StepContext, StepDefinition, StepResult } from '../types.ts';
 

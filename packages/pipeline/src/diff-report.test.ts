@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { emptyEdits, subtitleId, type AnalysisLayer, type EditsLayer } from '../../core/src/project.ts';
+import { emptyEdits, subtitleId, type AnalysisLayer, type EditsLayer } from '@contentos/core/project';
 import { buildResolveDiffReport } from './diff-report.ts';
 
 function analysis(overrides: Partial<AnalysisLayer> = {}): AnalysisLayer {

@@ -21,40 +21,40 @@ import {
   decodeAudioMono,
   probeMedia,
   resolveBinary,
-} from '../../packages/media/src/ffmpeg.ts';
-import { correctAudio } from '../../packages/media/src/audio-correct.ts';
+} from '@contentos/media/ffmpeg';
+import { correctAudio } from '@contentos/media/audio-correct';
 import {
   generateEmphasisSrt,
   generateSpeakerSrt,
   generateSubtitleSrt,
   generateYoutubeChapters,
-} from '../../packages/editing/src/srt.ts';
+} from '@contentos/editing/srt';
 import {
   computeEnvelope,
   syncSources,
   type Envelope,
-} from '../../packages/editing/src/audio-sync.ts';
+} from '@contentos/editing/audio-sync';
 import {
   detectLaughterCandidates,
   detectSpeakers,
-} from '../../packages/editing/src/speaker-detect.ts';
-import { planCameraSwitches } from '../../packages/editing/src/camera-plan.ts';
+} from '@contentos/editing/speaker-detect';
+import { planCameraSwitches } from '@contentos/editing/camera-plan';
 import {
   buildEditProject,
   type AudioSource,
   type VideoSource,
-} from '../../packages/editing/src/build-project.ts';
+} from '@contentos/editing/build-project';
 import {
   fcp7FileName,
   generateFcp7Xml,
   type Fcp7MediaFile,
   type Fcp7Rate,
-} from '../../packages/editing/src/fcp7xml.ts';
+} from '@contentos/editing/fcp7xml';
 import type {
   CameraSource,
   Speaker,
   Word,
-} from '../../packages/editing/src/types.ts';
+} from '@contentos/editing/types';
 
 // ─── 正解データ ───────────────────────────────────────────
 /** 素材の長さ（秒）。マスター音声はこれより長く作る。 */

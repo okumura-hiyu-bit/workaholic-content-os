@@ -19,8 +19,8 @@ import {
   markerId,
   type AnalysisCheck,
   type IdentifiedMarker,
-} from '../../../core/src/project.ts';
-import { lowConfidenceWords } from '../../../media/src/transcribe.ts';
+} from '@contentos/core/project';
+import { lowConfidenceWords } from '@contentos/media/transcribe';
 import type { StepContext, StepDefinition, StepResult } from '../types.ts';
 
 const LOW_CONFIDENCE_THRESHOLD = 0.5;

@@ -3,5 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "素材解析・プロジェクト生成・投稿のコマンド群"
+  "description": "素材解析・プロジェクト生成・投稿のコマンド群",
+  "dependencies": {
+    "@contentos/core": "*",
+    "@contentos/editing": "*",
+    "@contentos/media": "*",
+    "@contentos/pipeline": "*"
+  }
 }

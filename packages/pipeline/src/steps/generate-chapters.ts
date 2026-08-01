@@ -6,7 +6,7 @@
  * API処理の対象（後段のAIアシストモードで差し替える前提）。
  */
 
-import { chapterId, type IdentifiedChapter } from '../../../core/src/project.ts';
+import { chapterId, type IdentifiedChapter } from '@contentos/core/project';
 import type { StepContext, StepDefinition, StepResult } from '../types.ts';
 
 export interface ChapterHeuristicOptions {

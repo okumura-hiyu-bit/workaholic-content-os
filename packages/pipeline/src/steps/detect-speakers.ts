@@ -6,8 +6,8 @@
  * 文字起こしとは独立した処理（音量ベース）。
  */
 
-import { detectLaughterCandidates, detectSpeakers } from '../../../editing/src/speaker-detect.ts';
-import type { MicTrack } from '../../../editing/src/speaker-detect.ts';
+import { detectLaughterCandidates, detectSpeakers } from '@contentos/editing/speaker-detect';
+import type { MicTrack } from '@contentos/editing/speaker-detect';
 import { readEnvelopeCache } from '../envelope-cache.ts';
 import type { StepContext, StepDefinition, StepResult } from '../types.ts';
 

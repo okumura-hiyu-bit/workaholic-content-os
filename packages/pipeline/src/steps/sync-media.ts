@@ -12,9 +12,9 @@
  * extract-short-candidates が再デコードせず再利用できるようにする。
  */
 
-import { computeEnvelope, syncSources } from '../../../editing/src/audio-sync.ts';
-import type { ProjectAsset, SyncOffset } from '../../../core/src/project.ts';
-import { decodeAudioMono } from '../../../media/src/ffmpeg.ts';
+import { computeEnvelope, syncSources } from '@contentos/editing/audio-sync';
+import type { ProjectAsset, SyncOffset } from '@contentos/core/project';
+import { decodeAudioMono } from '@contentos/media/ffmpeg';
 import { PipelineErrors } from '../errors.ts';
 import { writeEnvelopeCache } from '../envelope-cache.ts';
 import { checkAborted } from '../process.ts';

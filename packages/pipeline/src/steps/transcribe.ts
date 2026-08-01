@@ -10,7 +10,7 @@
  * 都合で時間軸を詰めない。
  */
 
-import { buildVocabularyPrompt, transcribe } from '../../../media/src/transcribe.ts';
+import { buildVocabularyPrompt, transcribe } from '@contentos/media/transcribe';
 import { PipelineErrors } from '../errors.ts';
 import type { StepContext, StepDefinition, StepResult } from '../types.ts';
 import { extractedAudioPath } from './extract-audio.ts';

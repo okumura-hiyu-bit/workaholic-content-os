@@ -15,7 +15,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
-import type { Word } from '../../editing/src/types.ts';
+import type { Word } from '@contentos/editing/types';
 import { runProcess } from './process.ts';
 
 export interface TranscriptSegment {

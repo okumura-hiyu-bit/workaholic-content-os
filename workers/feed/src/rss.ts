@@ -13,8 +13,8 @@ import type {
   PodcastEpisode,
   PodcastShow,
   Post,
-} from '../../../packages/core/src/types.ts';
-import { isPublishable } from '../../../packages/core/src/status.ts';
+} from '@contentos/core/types';
+import { isPublishable } from '@contentos/core/status';
 
 /** OP3プレフィックス。無料のダウンロード計測（IAB 2.0準拠）。 */
 const OP3_PREFIX = 'https://op3.dev/e/';

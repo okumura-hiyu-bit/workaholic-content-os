@@ -22,20 +22,20 @@ import {
   buildEditProject,
   type AudioSource,
   type VideoSource,
-} from '../../packages/editing/src/build-project.ts';
+} from '@contentos/editing/build-project';
 import {
   fcp7FileName,
   generateFcp7Xml,
   type Fcp7MediaFile,
   type Fcp7Rate,
-} from '../../packages/editing/src/fcp7xml.ts';
-import { planCameraSwitches } from '../../packages/editing/src/camera-plan.ts';
+} from '@contentos/editing/fcp7xml';
+import { planCameraSwitches } from '@contentos/editing/camera-plan';
 import {
   generateEmphasisSrt,
   generateSpeakerSrt,
   generateSubtitleSrt,
   generateYoutubeChapters,
-} from '../../packages/editing/src/srt.ts';
+} from '@contentos/editing/srt';
 import type {
   CameraSource,
   ShortCandidate,
@@ -43,7 +43,7 @@ import type {
   SpeechSegment,
   TimelineMarker,
   Word,
-} from '../../packages/editing/src/types.ts';
+} from '@contentos/editing/types';
 
 /** ffprobe があれば実尺を読む。無ければ null（呼び出し側で既定値を使う）。 */
 function probeDurationSec(path: string): number | null {

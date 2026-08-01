@@ -10,7 +10,7 @@
  * @see docs/13-gui-mvp.md
  */
 
-import type { SyncMode } from '../../editing/src/build-project.ts';
+import type { SyncMode } from '@contentos/editing/build-project';
 import type {
   CameraShot,
   EmphasisPoint,
@@ -19,7 +19,7 @@ import type {
   Speaker,
   SpeechSegment,
   Word,
-} from '../../editing/src/types.ts';
+} from '@contentos/editing/types';
 
 /** 保存形式のバージョン。読み込み時の移行判断に使う。 */
 export const PROJECT_SCHEMA_VERSION = 1;

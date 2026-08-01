@@ -15,7 +15,7 @@
 import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, parse, relative, resolve } from 'node:path';
 
-import type { Project } from '../../core/src/project.ts';
+import type { Project } from '@contentos/core/project';
 import { PipelineErrors } from './errors.ts';
 import type { PipelineStepId, ProjectPaths } from './types.ts';
 

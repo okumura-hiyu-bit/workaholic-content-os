@@ -12,20 +12,20 @@
 
 import { join } from 'node:path';
 
-import { adoptedShorts, resolveProject } from '../../../core/src/resolve.ts';
-import type { ProjectAsset } from '../../../core/src/project.ts';
+import { adoptedShorts, resolveProject } from '@contentos/core/resolve';
+import type { ProjectAsset } from '@contentos/core/project';
 import {
   buildEditProject,
   type AudioSource,
   type VideoSource,
-} from '../../../editing/src/build-project.ts';
+} from '@contentos/editing/build-project';
 import {
   fcp7FileName,
   generateFcp7Xml,
   type Fcp7MediaFile,
   type Fcp7Rate,
-} from '../../../editing/src/fcp7xml.ts';
-import type { ShortCandidate } from '../../../editing/src/types.ts';
+} from '@contentos/editing/fcp7xml';
+import type { ShortCandidate } from '@contentos/editing/types';
 import { PipelineErrors } from '../errors.ts';
 import { writeManagedArtifact } from '../paths.ts';
 import type { StepContext, StepDefinition, StepResult } from '../types.ts';

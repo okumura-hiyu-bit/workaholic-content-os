@@ -9,7 +9,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import type { Envelope } from '../../editing/src/audio-sync.ts';
+import type { Envelope } from '@contentos/editing/audio-sync';
 
 function sidecarPath(waveformDir: string, assetId: string): string {
   return join(waveformDir, `${assetId}.json`);

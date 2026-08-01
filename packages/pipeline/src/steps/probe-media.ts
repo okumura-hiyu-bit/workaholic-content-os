@@ -12,8 +12,8 @@
 
 import { statSync } from 'node:fs';
 
-import type { ProjectAsset } from '../../../core/src/project.ts';
-import { probeMedia } from '../../../media/src/ffmpeg.ts';
+import type { ProjectAsset } from '@contentos/core/project';
+import { probeMedia } from '@contentos/media/ffmpeg';
 import { PipelineErrors } from '../errors.ts';
 import type { StepContext, StepDefinition, StepResult } from '../types.ts';
 

@@ -22,8 +22,8 @@ import {
   type Project,
   type ProjectStatus,
   type StepRecord,
-} from '../../core/src/project.ts';
-import { saveProject } from '../../core/src/project-store.ts';
+} from '@contentos/core/project';
+import { saveProject } from '@contentos/core/project-store';
 import { buildResolveDiffReport } from './diff-report.ts';
 import { PipelineErrors, isPipelineError } from './errors.ts';
 import {

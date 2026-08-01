@@ -9,8 +9,8 @@
 import { existsSync, statfsSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { checkFfmpegAvailable } from '../../../media/src/ffmpeg.ts';
-import { resolvePython } from '../../../media/src/transcribe.ts';
+import { checkFfmpegAvailable } from '@contentos/media/ffmpeg';
+import { resolvePython } from '@contentos/media/transcribe';
 import { PipelineErrors } from '../errors.ts';
 import type { StepContext, StepDefinition, StepResult } from '../types.ts';
 

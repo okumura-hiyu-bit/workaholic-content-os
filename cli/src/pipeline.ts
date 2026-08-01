@@ -18,7 +18,7 @@
 import { existsSync } from 'node:fs';
 import { dirname, isAbsolute, resolve } from 'node:path';
 
-import { loadProject } from '../../packages/core/src/project-store.ts';
+import { loadProject } from '@contentos/core/project-store';
 import {
   PIPELINE_STEP_IDS,
   PIPELINE_STEP_LABELS,
@@ -26,7 +26,7 @@ import {
   type PipelineStepId,
   type ProgressEvent,
   type RunPipelineOptions,
-} from '../../packages/pipeline/src/index.ts';
+} from '@contentos/pipeline';
 
 interface ParsedArgs {
   projectDir: string;
