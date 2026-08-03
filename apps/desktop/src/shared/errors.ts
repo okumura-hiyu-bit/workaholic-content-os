@@ -25,6 +25,14 @@ export const DESKTOP_ERROR_CODES = {
   ENVIRONMENT_NOT_READY: 'ENVIRONMENT_NOT_READY',
   /** リポジトリルート（projectRoot）を解決できなかった。 */
   PROJECT_ROOT_NOT_FOUND: 'PROJECT_ROOT_NOT_FOUND',
+  /** 読み込み後に project.json が別の処理で更新されていた（競合更新）。 */
+  PROJECT_CHANGED: 'PROJECT_CHANGED',
+  /** 指定された字幕が見つからない。 */
+  SUBTITLE_NOT_FOUND: 'SUBTITLE_NOT_FOUND',
+  /** IDが重複していて安全に修正できない字幕。 */
+  SUBTITLE_NOT_EDITABLE: 'SUBTITLE_NOT_EDITABLE',
+  /** 解析がまだ行われていない（字幕が存在しない）。 */
+  ANALYSIS_NOT_READY: 'ANALYSIS_NOT_READY',
   UNKNOWN: 'UNKNOWN',
 } as const;
 

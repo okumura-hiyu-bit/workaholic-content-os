@@ -1,6 +1,6 @@
 # CURRENT STATE — 引き継ぎドキュメント
 
-> 作成日: 2026-07-30 / 最終更新: 2026-08-01（Step 1「土台整理」と Step 2「Electron骨組み + IPC」を反映）。この内容は会話の要約ではなく、**実際のリポジトリ・テスト結果・型チェック結果を根拠に**作成しています。数値は必ず次回セッション側でも再確認してください（本ファイル末尾のコマンド）。
+> 作成日: 2026-07-30 / 最終更新: 2026-08-03（Step 1「土台整理」、Step 2「Electron骨組み + IPC」、Step 3「確認画面：字幕」を反映）。この内容は会話の要約ではなく、**実際のリポジトリ・テスト結果・型チェック結果を根拠に**作成しています。数値は必ず次回セッション側でも再確認してください（本ファイル末尾のコマンド）。
 
 ---
 
@@ -18,7 +18,7 @@
 
 ## 2. 現在のアーキテクチャ
 
-モノレポ構成（npm workspaces）。`package.json` の `workspaces`: `["packages/*", "workers/*", "cli", "apps/*"]`（`apps/` は未作成＝Electron未着手）。
+モノレポ構成（npm workspaces）。`package.json` の `workspaces`: `["packages/*", "workers/*", "cli", "apps/*"]`。
 
 ```
 packages/core      … データモデル・状態遷移・投稿可否判定・プロジェクトの永続化（単一の正）
@@ -58,7 +58,7 @@ apps/desktop/main → @contentos/core（project.json の読み書きのみ）
 ```
 
 - `packages/core` は他のどのpackageにも依存しない（末端）。ただし `packages/core/src/project.ts` だけは `packages/editing` を参照する例外的な逆依存を持つ（`build-project.ts` の型 `SyncMode`、および `types.ts` の `CameraShot`・`Speaker`・`Word` 等7つ）。いずれも `import type` のみで、ロジック依存ではない。
-- `packages/pipeline` は React・Electron・DOM を一切importしない（`packages/pipeline/src/index.ts` のコメントに明記）。CLIからも将来のElectronメインプロセスからも同じ関数（`runPipeline()`）を呼ぶだけで完結する。
+- `packages/pipeline` は React・Electron・DOM を一切importしない（`packages/pipeline/src/index.ts` のコメントに明記）。CLIからもElectronの解析専用プロセスからも同じ関数（`runPipeline()`）を呼ぶだけで完結する。
 - `packages/ai` は現状どの実行フローからも呼ばれていない（コスト管理・ローカルモードの型とロジックのみ実装済み。パイプラインへの配線は未実施）。
 
 ### パッケージ間の参照方法（★2026-08-01 変更。GUI着手前の土台整理）
@@ -155,6 +155,32 @@ cwd固定なら `packages/*` を一切変更せずに同じ結果が得られる
 
 **二重実行の防止**：`run-pipeline.ts` は変更していない。`main/run-manager.ts` が実行中プロジェクトの `Set` と runId の `Map` を持ち、UIの `disabled` に依存せずMain側で開始要求そのものを拒否する。同じprojectIdなら `PROJECT_ALREADY_RUNNING`、別プロジェクトなら `ALREADY_RUNNING`。中止完了まで再実行不可。解析プロセスが異常終了した場合も `onExit` で必ずロックを解放する。
 
+### 確認画面（Review）— 字幕（2026-08-03 追加）
+
+**★人間の修正は `project.edits` にだけ書く。`project.analysis` は絶対に触らない。**
+表示値は自作せず `resolveProject()` に作らせ、履歴は `recordEdit()` で残す。保存は `saveProject()`（一時ファイル→rename）に任せる。
+
+| 関心事 | 実装 |
+|---|---|
+| データ組み立て・保存 | `apps/desktop/src/main/review.ts` |
+| 入力検証 | `apps/desktop/src/shared/review-validate.ts` |
+| DTO | `apps/desktop/src/shared/review-dto.ts` |
+| 再生用プレビュー | `apps/desktop/src/main/media.ts` |
+| 画面 | `apps/desktop/src/renderer/ReviewScreen.tsx` + `review-state.ts` |
+
+**競合更新の防ぎ方**：読み込み時の `updatedAt` を `expectedUpdatedAt` として保存要求に載せ、Main が保存直前に現在値と照合する。食い違えば**上書きせず**「プロジェクトが別の処理で更新されました。再読み込みしてください」を返す。`saveProject` が保存のたびに `updatedAt` を更新するので、古い値での連続保存も同じ経路で弾かれる。
+
+**競合の検出方法（実行時の diff とは別物）**：`buildResolveDiffReport`（パイプライン）は再解析前後の解析結果を比べるが、その結果は project.json に残らない。確認画面を開く時点では旧解析が無いため、`recordEdit` が残した履歴の `before`（修正した時点の解析値）を現在の解析値と比べて競合を出す。
+
+**再出力**：`generate-premiere-xml` → `save-artifacts` → `save-project` の3工程だけを `onlySteps` + `force` で実行する（工程はMainが固定し、Rendererに選ばせない）。`force` が要るのは、キャッシュキーが素材と設定から作られ **`project.edits` を含まない**ため。付けないと「変更なし」でスキップされ、修正が成果物に出ない。解析・文字起こし・同期は再実行しない。
+
+**再生用プレビュー**：4K素材を再生せず、`cache/preview/<assetId>.m4a`（AAC・モノラル・32kHz・64kbps指定）を生成して使う。元素材は読むだけで変更しない。Rendererには絶対パスを渡さず、`contentos-media://<token>` だけを渡す。tokenからパスへの変換は Main のレジストリだけが知り、**未登録トークンは404**になる。
+
+**★今回の制限（画面にも明記済み）**
+- **タイムコード編集は未対応。** `SubtitleEdit`（`packages/core`）が `text` / `speakerId` / `deleted` しか持たず、時刻を適用するには凍結対象の `resolve.ts` の変更が必要になるため。要求が来たら黙って無視せず検証で拒否する。
+- **話者の修正は成果物に反映されない。** `project.edits` には保存され画面にも出るが、`subtitle.srt` は本文のみを使い、`speaker.srt` は `analysis.speech`（発話区間）から作られるため。本文の修正は `subtitle.srt` に反映される（実機で確認済み）。
+- **IDが重複する字幕は編集不可。** 字幕IDは開始時刻から作る（`sub-` + ミリ秒）ため、開始が同一のキューが2つできると衝突する（実データで発生）。`resolveProject` は修正をIDで紐づけるので、この状態で修正すると同じIDの全キューに適用されてしまう。誤った保存を防ぐため、該当キューは画面でもMainでも編集を拒否する。
+
 ---
 
 ## 3. 実装済み機能（コード＋テスト or 実機確認済みのみ）
@@ -197,7 +223,18 @@ cwd固定なら `packages/*` を一切変更せずに同じ結果が得られる
 | 安全なエラーDTOへの変換 | `apps/desktop/src/shared/errors.ts` | テスト（6件）＋実機（DTOに`technicalMessage`が無いことを確認） |
 | 画面の状態遷移（未選択/選択済み/解析中/完了/警告/失敗/中止） | `apps/desktop/src/renderer/state.ts` | テスト（23件） |
 | 工程一覧の本体との一致検証 | `apps/desktop/src/shared/steps.ts` | テスト（5件。`@contentos/pipeline` と突き合わせ） |
-| 表示整形（経過時間・進捗率・成果物パスの短縮） | `apps/desktop/src/renderer/format.ts` | テスト（8件） |
+| 表示整形（経過時間・進捗率・成果物パスの短縮） | `apps/desktop/src/renderer/format.ts` | テスト（16件） |
+
+### 確認画面：字幕（2026-08-03 追加）
+
+| 機能 | 実装場所 | 確認状況 |
+|---|---|---|
+| Reviewデータの組み立て・字幕修正の保存 | `apps/desktop/src/main/review.ts` | テスト（32件）＋実機 |
+| 字幕修正リクエストの検証 | `apps/desktop/src/shared/review-validate.ts` | テスト（32件）＋実機（6種の不正入力を拒否） |
+| 再生用プレビュー・メディアトークン | `apps/desktop/src/main/media.ts` | テスト（17件）＋実機（AAC 32kHz/モノラル/47kbps を生成・再生） |
+| 画面の状態遷移（loading/ready/dirty/saving/saved/conflict/export-running/export-complete/failed） | `apps/desktop/src/renderer/review-state.ts` | テスト（30件） |
+| Review画面 | `apps/desktop/src/renderer/ReviewScreen.tsx` | 実機（データ層・IPC層のみ。ダイアログ経由のUI操作は未確認） |
+| 部分再出力（字幕修正の反映） | `apps/desktop/src/main/ipc.ts` の `REVIEW_EXPORT_STEPS` | テスト（8件）＋実機（SRTへの反映を確認） |
 
 ---
 
@@ -225,11 +262,11 @@ $ npm run typecheck
 （エラー0件）
 
 $ npm test
-Test Files  29 passed (29)
-     Tests  617 passed (617)
+Test Files  33 passed (33)
+     Tests  757 passed (757)
 ```
 
-内訳：既存のコア 462件（19ファイル）＋ Electron 155件（10ファイル）。Electronのテストは ffmpeg・faster-whisper を一切起動せず、解析専用プロセスの起動関数を差し替えて検証している。
+内訳：既存のコア 462件（19ファイル）＋ Electron 295件（14ファイル）。Electronのテストは ffmpeg・faster-whisper を一切起動せず、解析専用プロセスの起動関数を差し替えて検証している。
 
 - **実機smoke testの結果**：`cli/src/pipeline.ts`を実プロジェクト（`project.json`＋実際のffmpeg/whisper）に対して複数回実行し、以下を確認済み。
   - フルラン：15/15完了（0失敗・0警告、修正後）
@@ -273,6 +310,20 @@ Test Files  29 passed (29)
   - 部分実行（`--to sync-media` 相当）4工程を2.9秒で完了
   - **文字起こし工程の途中での中止**（whisperの子プロセスが停止し、`cancelled: true` で完了報告）
 - **★CLI回帰とキャッシュ共有の確認**：GUIで解析した同じプロジェクトに対して `npm run pipeline -- --project <dir> --to sync-media` を実行すると、**4工程すべてがキャッシュヒットしてスキップされた**。GUIとCLIがキャッシュを共有できている（＝`TranscribeConfig` に `projectRoot` を足さない判断が正しく効いている）ことの実証。
+- **確認画面の実機確認（2026-08-03）**：実際にElectronアプリを起動し、CDP経由で以下を確認した。
+  1. 確認画面のデータ読み込み（8キュー / 低confidence語125 / 話者2名 / ID重複2件を検出）
+  2. 低confidence語と最小信頼度が表示用データとして返る
+  3. **DTOに `pipeline` 工程記録・`apiUsage`・素材の絶対パス・`edits` レイヤーが含まれない**
+  4. 不正入力6種をすべて拒否（不正subtitleId / 存在しないspeakerId / タイムコード編集 / 長すぎる本文 / 制御文字 / 古いupdatedAt）
+  5. 字幕本文と話者を修正して保存 → `updatedAt` が更新される
+  6. **再読み込みしても修正が残る**（解析側の元本文も併せて参照できる）
+  7. 古い `updatedAt` での再保存が競合として拒否される
+  8. **再出力（3工程のみ）で `subtitle.srt` の該当行が「つい」→「【実機確認】ここを人が直しました」に変わった**
+  9. **`analysis.subtitles` は作業の前後で完全一致**（差分は `generatedAt` / `fingerprint` / `checks` のみ＝パイプライン実行が書くメタ情報）
+  10. CLIでフル解析を実行しても `edits.subtitles` が保持された（＝再解析で人間修正が消えない）
+  11. プレビュー音声を生成（AAC / 32kHz / モノラル / 47kbps / 241KB）。元素材は無変更
+  12. **メディアプロトコルの防御**：正規トークンのURLは `<audio>` で再生でき（duration 40秒）、偽造トークンは拒否、`file:///etc/passwd` はCSPで遮断
+- **再出力が依存未完了で失敗する場合の確認**：中止された工程（`correct-audio: cancelled`）が残った状態で再出力すると、`DEPENDENCY_NOT_COMPLETED`「依存する工程「correct-audio」がまだ完了していません。」が返り、**誤った成果物を作らずに停止する**ことを確認した。フル解析を1回通せば解消する。
 
 ---
 
@@ -289,6 +340,9 @@ Test Files  29 passed (29)
 - **【Electron】アプリの強制終了（SIGKILL）時の解析プロセス**：`before-quit` 経由の通常終了では解析プロセスが確実に終了することを確認済み（孤児プロセス0件）。ただしSIGKILLでMainが即死した場合、`fork` した解析プロセスが孤児として残る可能性がある（未検証）。
 - **【Electron】パッケージ配布**：`app.isPackaged` の分岐は実装済みだが、実際にアプリをパッケージ化して `resources` から projectRoot を解決する経路は未検証（インストーラは今回のスコープ外）。
 - **【Electron】長時間実行時のUI**：40秒のfixtureで100秒の完走を確認したのみ。10分規模の素材での進捗表示の見え方・メモリは未計測。
+- **【確認画面】画面上の操作**：データ層・IPC層はCDP経由で実アプリを操作して確認済みだが、**ファイル選択ダイアログを経て確認画面を開き、一覧をクリックして本文を打ち替える一連のUI操作は人手で未確認**（ダイアログがOSネイティブのため自動化できない）。状態遷移そのものはリデューサのテスト30件で固定してある。
+- **【確認画面】長い字幕一覧の描画**：8キューでの確認のみ。10分規模（数百キュー）でのスクロール性能・再生同期の追随は未計測。
+- **【確認画面】プレビュー生成の所要時間**：40秒素材で即時。長尺素材での生成時間と、生成中のUIの見え方は未検証（生成は非同期で行うためメインプロセスは止まらない）。
 
 ---
 
@@ -316,19 +370,30 @@ Electron GUIの前提となる構成の整理を実施済み。**ロジックの
 - 二重実行防止はElectron層のみで実装（`run-pipeline.ts` は無変更）
 - テスト155件を追加（ffmpeg・faster-whisperは起動しない）
 
-### 次の実装：確認画面（Review）★最も価値が高い
+### 完了済み：Step 3 — 確認画面（字幕）（2026-08-03）
 
-`docs/13-gui-mvp.md` 13.2 ④ に相当。今回作った土台の上に、次を順に作る。
+字幕の確認・修正・保存・部分再出力まで。**`packages/*` は今回も無変更**。
 
-1. **プロジェクト一覧・素材登録画面**（現在は project.json を直接選ぶ方式。素材のドラッグ＆ドロップと役割推測はまだ無い）
-2. **確認画面 — 字幕の修正**（低confidence語の強調表示 → 修正 → `project.edits` にのみ書き込む）
-3. **確認画面 — カメラ切替の修正**
-4. **確認画面 — ショート候補の採否**
-5. **孤立修正・競合修正の表示と再接続UI**（件数は既に完了画面に出している。中身の提示はこれから）
-6. 書き出し画面
-7. AI設定（ローカルモードで配線 → GeminiProvider）
+- 字幕一覧・低confidence語の強調・話者・信頼度・修正済み/競合/ID重複の表示
+- 本文と話者の修正を `project.edits` にだけ保存（`analysis` は不変。実機で確認済み）
+- `expectedUpdatedAt` による競合更新の検出（上書きしない）
+- プレビュー音声の生成と `contentos-media://` による安全な再生
+- 3工程だけの部分再出力（解析・文字起こし・同期をやり直さない）
+- テスト140件を追加
 
-**★確認画面を作るときの注意**：修正の保存は必ず `project.edits` だけを書き換えること（`Project.analysis` は再解析で丸ごと差し替わる領域）。IPCに `edits` 更新用のチャンネルを足す際も、Rendererから届く値をMain側で検証してから `saveProject()` に渡す。
+### 次の実装
+
+1. **確認画面 — カメラ切替の修正**（`edits.cameraShots` は `overrides` / `inserted` / `deletedIds` の3構造。字幕より複雑）
+2. **確認画面 — ショート候補の採否**（`edits.shorts`。IDに時刻を含まないため、候補が変われば必ず `orphaned` になる仕様）
+3. **孤立修正の再接続UI**（現在は一覧表示のみ。「この修正をこのキューに付け直す」操作はまだ無い）
+4. **プロジェクト一覧・素材登録画面**（現在は project.json を直接選ぶ方式）
+5. 書き出し画面
+6. AI設定（ローカルモードで配線 → GeminiProvider）
+
+**★次に着手する人へ：先に解消を検討したい2点**
+
+- **話者修正が成果物に届いていない。** `edits` には保存されるが `subtitle.srt` / `speaker.srt` のどちらにも反映されない（前述）。反映させるには `save-artifacts.ts` が resolved subtitle の `speakerId` を使うように変える必要がある。成果物の中身が変わるため、着手前にユーザーへ確認すること。
+- **字幕IDの重複。** 開始時刻が同一のキューがあるとIDが衝突し、修正が両方に効いてしまうため現在は編集不可にしている。根治には `generate-subtitles` のID生成を変える必要があるが、**既存の `edits` のキーが全て無効になる**（＝保存済みの修正が孤立する）。移行方法とセットで設計すること。
 
 ---
 
@@ -389,3 +454,6 @@ npm run selfcheck
 - **`runPipeline()` をElectronメインプロセスで直接実行しないこと。** 同期のCPU集約処理でウィンドウが固まる。必ず解析専用プロセス経由にする。
 - **`TranscribeConfig`（`packages/pipeline/src/types.ts`）に項目を足さないこと。** `stepConfigSlice('transcribe')` がこのオブジェクトを丸ごとキャッシュキーにしているため、項目を足すと文字起こしのキャッシュが無効化され、CLIとGUIでキャッシュを共有できなくなる。
 - **Rendererへ `technicalMessage` や stack trace を渡さないこと。** 必ず `toSafeError()` を通す。開発者向け情報は構造化ログにのみ残す。
+- **確認画面から `project.analysis` を書き換えないこと。** 人間の修正は `project.edits` にだけ書く。表示値は必ず `resolveProject()` に作らせ、独自の突き合わせロジックを増やさない。履歴は `recordEdit()` で残す。
+- **保存時の `expectedUpdatedAt` の照合を外さないこと。** 別ウィンドウやCLIが同じ project.json を更新している可能性があるため、食い違ったら上書きせず競合として返す。
+- **Rendererに絶対パスやファイルアクセスを渡さないこと。** 再生用メディアは `contentos-media://<token>` のみ。トークンは Main が明示的に登録したパスにしか解決しない。

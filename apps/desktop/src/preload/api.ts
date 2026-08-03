@@ -22,6 +22,15 @@ import type {
   ReadProjectSummaryResult,
   StartPipelineRequest,
 } from '../shared/dto.ts';
+import type {
+  OpenMediaResult,
+  RemoveSubtitleEditRequest,
+  ReviewExportRequest,
+  ReviewExportResult,
+  ReviewLoadResult,
+  SaveSubtitleEditResult,
+  UpdateSubtitleEditRequest,
+} from '../shared/review-dto.ts';
 import { IPC } from '../shared/ipc.ts';
 
 /** ipcRenderer のうち、この層が使う部分だけ。 */
@@ -43,6 +52,11 @@ export const ALLOWED_API_KEYS = [
   'openProjectFolder',
   'onPipelineProgress',
   'onPipelineFinished',
+  'reviewLoad',
+  'reviewUpdateSubtitle',
+  'reviewRemoveSubtitleEdit',
+  'reviewExport',
+  'reviewOpenMedia',
 ] as const;
 
 function subscribe<T>(
@@ -91,6 +105,32 @@ export function createDesktopApi(ipc: IpcBridge): ContentOsDesktopApi {
 
     onPipelineFinished(listener: (event: PipelineFinishedEvent) => void) {
       return subscribe<PipelineFinishedEvent>(ipc, IPC.pipelineFinished, listener);
+    },
+
+    async reviewLoad(projectPath: string) {
+      return (await ipc.invoke(IPC.reviewLoad, projectPath)) as ReviewLoadResult;
+    },
+
+    async reviewUpdateSubtitle(request: UpdateSubtitleEditRequest) {
+      return (await ipc.invoke(
+        IPC.reviewUpdateSubtitle,
+        request,
+      )) as SaveSubtitleEditResult;
+    },
+
+    async reviewRemoveSubtitleEdit(request: RemoveSubtitleEditRequest) {
+      return (await ipc.invoke(
+        IPC.reviewRemoveSubtitleEdit,
+        request,
+      )) as SaveSubtitleEditResult;
+    },
+
+    async reviewExport(request: ReviewExportRequest) {
+      return (await ipc.invoke(IPC.reviewExport, request)) as ReviewExportResult;
+    },
+
+    async reviewOpenMedia(projectPath: string) {
+      return (await ipc.invoke(IPC.reviewOpenMedia, projectPath)) as OpenMediaResult;
     },
   };
 }

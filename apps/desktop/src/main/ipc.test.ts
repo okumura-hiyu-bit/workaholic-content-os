@@ -7,9 +7,10 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { safeError } from '../shared/errors.ts';
-import { createIpcHandlers, type IpcDeps } from './ipc.ts';
+import { createIpcHandlers, REVIEW_EXPORT_STEPS, type IpcDeps } from './ipc.ts';
 import { RunManager } from './run-manager.ts';
 import type { AnalysisProcess } from './analysis-process.ts';
+import { createFakeStore, projectFixture } from './testing/fake-core.ts';
 
 const PROJECT_ROOT = '/Users/someone/workaholic-content-os';
 
@@ -48,8 +49,15 @@ function createDeps(overrides: Partial<IpcDeps> = {}) {
     logger: { info: () => {}, error: () => {} },
   });
 
+  const store = createFakeStore({ '/tmp/ep012': projectFixture() });
+
   const deps: IpcDeps = {
     runManager,
+    review: store.deps,
+    openMedia: async () => ({
+      ok: false,
+      error: safeError('ENVIRONMENT_NOT_READY', 'プレビューは未生成です。'),
+    }),
     fileExists: () => true,
     loadProject: () => structuredClone(validProject),
     showProjectDialog,
@@ -59,7 +67,15 @@ function createDeps(overrides: Partial<IpcDeps> = {}) {
     ...overrides,
   };
 
-  return { deps, handlers: createIpcHandlers(deps), spawn, openFolder, showProjectDialog, runManager };
+  return {
+    deps,
+    handlers: createIpcHandlers(deps),
+    spawn,
+    openFolder,
+    showProjectDialog,
+    runManager,
+    store,
+  };
 }
 
 describe('selectProject', () => {
@@ -232,6 +248,250 @@ describe('cancelPipeline', () => {
 
     const result = await handlers.cancelPipeline('run-1');
     expect(result.ok).toBe(true);
+  });
+});
+
+describe('review:load', () => {
+  it('★確認画面のデータを返す', async () => {
+    const { handlers } = createDeps();
+    const result = await handlers.reviewLoad('/tmp/ep012');
+
+    expect(result.ok).toBe(true);
+    expect(result.ok && result.data.subtitles).toHaveLength(3);
+    expect(result.ok && result.data.speakers.map((s) => s.id)).toEqual([
+      'spk_a',
+      'spk_b',
+    ]);
+  });
+
+  it('★不正なパスを拒否する', async () => {
+    const { handlers } = createDeps();
+    const result = await handlers.reviewLoad('relative/path');
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.error.code).toBe('INVALID_REQUEST');
+  });
+
+  it('★有効なプロジェクトでなければ拒否する', async () => {
+    const { handlers } = createDeps({ fileExists: () => false });
+    const result = await handlers.reviewLoad('/tmp/none');
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.error.code).toBe('INVALID_PROJECT');
+  });
+});
+
+describe('review:update-subtitle', () => {
+  const base = () => ({
+    projectPath: '/tmp/ep012',
+    subtitleId: 'sub-00000000',
+    expectedUpdatedAt: '2026-08-01T00:00:00.000Z',
+  });
+
+  it('★本文を修正できる', async () => {
+    const { handlers, store } = createDeps();
+    const result = await handlers.reviewUpdateSubtitle({
+      ...base(),
+      patch: { text: '直しました' },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(store.read('/tmp/ep012').edits.subtitles['sub-00000000']).toEqual({
+      text: '直しました',
+    });
+  });
+
+  it('★不正な subtitleId を拒否する（保存しない）', async () => {
+    const { handlers, store } = createDeps();
+    const result = await handlers.reviewUpdateSubtitle({
+      ...base(),
+      subtitleId: '../../etc/passwd',
+      patch: { text: 'x' },
+    });
+    expect(result.ok).toBe(false);
+    expect(store.saveCount()).toBe(0);
+  });
+
+  it('★存在しない speakerId を拒否する（保存しない）', async () => {
+    const { handlers, store } = createDeps();
+    const result = await handlers.reviewUpdateSubtitle({
+      ...base(),
+      patch: { speakerId: 'spk_zzz' },
+    });
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.error.userMessage).toContain('存在しない');
+    expect(store.saveCount()).toBe(0);
+  });
+
+  it('★タイムコードの編集を拒否する', async () => {
+    const { handlers, store } = createDeps();
+    const result = await handlers.reviewUpdateSubtitle({
+      ...base(),
+      patch: { text: 'x', startSec: 1 },
+    });
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.error.userMessage).toContain('未対応');
+    expect(store.saveCount()).toBe(0);
+  });
+
+  it('★長すぎる本文を拒否する', async () => {
+    const { handlers, store } = createDeps();
+    const result = await handlers.reviewUpdateSubtitle({
+      ...base(),
+      patch: { text: 'あ'.repeat(1000) },
+    });
+    expect(result.ok).toBe(false);
+    expect(store.saveCount()).toBe(0);
+  });
+
+  it('★制御文字を含む本文を拒否する', async () => {
+    const { handlers, store } = createDeps();
+    const result = await handlers.reviewUpdateSubtitle({
+      ...base(),
+      patch: { text: 'あ い' },
+    });
+    expect(result.ok).toBe(false);
+    expect(store.saveCount()).toBe(0);
+  });
+
+  it('★expectedUpdatedAt が食い違えば競合として拒否する', async () => {
+    const { handlers, store } = createDeps();
+    const result = await handlers.reviewUpdateSubtitle({
+      ...base(),
+      expectedUpdatedAt: '2020-01-01T00:00:00.000Z',
+      patch: { text: 'x' },
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.conflict).toBe(true);
+    expect(store.saveCount()).toBe(0);
+  });
+});
+
+describe('review:remove-subtitle-edit', () => {
+  it('修正を取り消せる', async () => {
+    const { handlers, store } = createDeps();
+    const saved = await handlers.reviewUpdateSubtitle({
+      projectPath: '/tmp/ep012',
+      subtitleId: 'sub-00000000',
+      expectedUpdatedAt: '2026-08-01T00:00:00.000Z',
+      patch: { text: '直した' },
+    });
+    expect(saved.ok).toBe(true);
+    if (!saved.ok) return;
+
+    const removed = await handlers.reviewRemoveSubtitleEdit({
+      projectPath: '/tmp/ep012',
+      subtitleId: 'sub-00000000',
+      expectedUpdatedAt: saved.updatedAt,
+    });
+    expect(removed.ok).toBe(true);
+    expect(store.read('/tmp/ep012').edits.subtitles['sub-00000000']).toBeUndefined();
+  });
+
+  it('★不正なリクエストを拒否する', async () => {
+    const { handlers } = createDeps();
+    const result = await handlers.reviewRemoveSubtitleEdit({ projectPath: 'rel' });
+    expect(result.ok).toBe(false);
+  });
+});
+
+describe('review:export（部分再出力）', () => {
+  it('★字幕に関わる工程だけを実行する', async () => {
+    const { handlers, runManager } = createDeps();
+    const start = vi.spyOn(runManager, 'start');
+
+    const result = await handlers.reviewExport({ projectPath: '/tmp/ep012' });
+
+    expect(result.ok).toBe(true);
+    expect(result.ok && result.steps).toEqual([
+      'generate-premiere-xml',
+      'save-artifacts',
+      'save-project',
+    ]);
+
+    const options = start.mock.calls[0]?.[0].options;
+    expect(options?.onlySteps).toEqual(REVIEW_EXPORT_STEPS);
+  });
+
+  it('★解析・文字起こし・同期を再実行しない', async () => {
+    const { handlers, runManager } = createDeps();
+    const start = vi.spyOn(runManager, 'start');
+    await handlers.reviewExport({ projectPath: '/tmp/ep012' });
+
+    const steps = start.mock.calls[0]?.[0].options.onlySteps ?? [];
+    for (const heavy of [
+      'transcribe',
+      'sync-media',
+      'extract-audio',
+      'detect-speakers',
+      'correct-audio',
+      'probe-media',
+      'generate-subtitles',
+    ]) {
+      expect(steps).not.toContain(heavy);
+    }
+  });
+
+  it('★force を付ける（editsはキャッシュキーに入らないため）', async () => {
+    const { handlers, runManager } = createDeps();
+    const start = vi.spyOn(runManager, 'start');
+    await handlers.reviewExport({ projectPath: '/tmp/ep012' });
+    expect(start.mock.calls[0]?.[0].options.force).toBe(true);
+  });
+
+  it('★projectRoot を明示的に渡す', async () => {
+    const { handlers, runManager } = createDeps();
+    const start = vi.spyOn(runManager, 'start');
+    await handlers.reviewExport({ projectPath: '/tmp/ep012' });
+    expect(start.mock.calls[0]?.[0].projectRoot).toBe(PROJECT_ROOT);
+  });
+
+  it('★実行中は再出力を拒否する', async () => {
+    const { handlers } = createDeps();
+    const first = await handlers.reviewExport({ projectPath: '/tmp/ep012' });
+    const second = await handlers.reviewExport({ projectPath: '/tmp/ep012' });
+
+    expect(first.ok).toBe(true);
+    expect(second.ok).toBe(false);
+    expect(second.ok === false && second.error.code).toBe('PROJECT_ALREADY_RUNNING');
+  });
+
+  it('★環境が整っていなければ実行しない', async () => {
+    const { handlers, spawn } = createDeps({
+      preflight: () => ({
+        ok: false,
+        error: safeError('ENVIRONMENT_NOT_READY', 'ビルドされていません。'),
+      }),
+    });
+    const result = await handlers.reviewExport({ projectPath: '/tmp/ep012' });
+    expect(result.ok).toBe(false);
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('★不正なパスを拒否する', async () => {
+    const { handlers, spawn } = createDeps();
+    const result = await handlers.reviewExport({ projectPath: 'relative' });
+    expect(result.ok).toBe(false);
+    expect(spawn).not.toHaveBeenCalled();
+  });
+});
+
+describe('review:open-media', () => {
+  it('★不正なパスを拒否する', async () => {
+    const { handlers } = createDeps();
+    const result = await handlers.reviewOpenMedia('relative/path');
+    expect(result.ok).toBe(false);
+  });
+
+  it('有効なプロジェクトなら openMedia に委ねる', async () => {
+    const openMedia = vi.fn(async () => ({
+      ok: true as const,
+      media: { url: 'contentos-media://abc', durationSec: 40, sourceFileName: 'wide.mp4' },
+    }));
+    const { handlers } = createDeps({ openMedia });
+    const result = await handlers.reviewOpenMedia('/tmp/ep012');
+
+    expect(result.ok).toBe(true);
+    expect(openMedia).toHaveBeenCalledWith('/tmp/ep012');
   });
 });
 

@@ -321,6 +321,299 @@ body {
   background: var(--gray-400);
 }
 
+/* ─── 確認画面（Review）─── */
+
+.review {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.review__meta {
+  margin: 0;
+  color: var(--gray-600);
+  font-size: 13px;
+}
+
+.review__note {
+  margin: 8px 0 0;
+  color: var(--gray-600);
+  font-size: 12px;
+}
+
+.review__note--danger {
+  color: var(--danger);
+}
+
+.stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 22px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--gray-100);
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.stat__label {
+  font-size: 11px;
+  color: var(--gray-600);
+}
+
+.stat__value {
+  font-size: 18px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat__value--warn {
+  color: var(--warn);
+}
+
+.stat__value--edited {
+  color: var(--blue);
+}
+
+.badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.badge--muted {
+  background: var(--gray-100);
+  color: var(--gray-600);
+}
+
+.badge--warn {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.badge--ok {
+  background: #e6f4ec;
+  color: var(--ok);
+}
+
+.badge--danger {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+/* 再生 */
+
+.player {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.player__tc {
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  color: var(--gray-800);
+}
+
+.player__seek {
+  flex: 1 1 260px;
+  accent-color: var(--blue);
+}
+
+/* 字幕一覧 */
+
+.cues {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+.cues__item {
+  border-bottom: 1px solid var(--gray-100);
+}
+
+.cues__button {
+  display: grid;
+  grid-template-columns: 190px 90px 1fr auto;
+  gap: 12px;
+  align-items: baseline;
+  width: 100%;
+  padding: 9px 8px;
+  background: none;
+  border: none;
+  border-left: 3px solid transparent;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.cues__button:hover {
+  background: var(--gray-50);
+}
+
+.cues__item--selected .cues__button {
+  background: var(--blue-soft);
+  border-left-color: var(--blue);
+}
+
+/* 青系＝保存済みの修正 */
+.cues__item--edited .cues__button {
+  border-left-color: var(--blue);
+}
+
+/* 赤系＝競合 */
+.cues__item--conflicted .cues__button {
+  border-left-color: var(--danger);
+}
+
+.cues__item--locked .cues__button {
+  opacity: 0.72;
+}
+
+.cues__tc {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: var(--gray-600);
+  font-variant-numeric: tabular-nums;
+}
+
+.cues__speaker {
+  font-size: 12px;
+  color: var(--gray-600);
+}
+
+.cues__text {
+  font-size: 13px;
+  white-space: pre-wrap;
+}
+
+.cues__flags {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.cues__conf {
+  font-size: 11px;
+  color: var(--gray-400);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 黄系＝低confidence語 */
+.lowconf {
+  background: #fdf0c9;
+  color: #6b4c00;
+  border-radius: 3px;
+  padding: 0 1px;
+}
+
+.tag {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 700;
+}
+
+.tag--edited {
+  background: var(--blue-soft);
+  color: var(--blue-dark);
+}
+
+.tag--conflict {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.tag--locked {
+  background: var(--gray-100);
+  color: var(--gray-600);
+}
+
+/* 孤立・競合 */
+
+.card--attention {
+  border-color: #f0bdb9;
+}
+
+.attention {
+  display: flex;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--gray-100);
+  font-size: 13px;
+}
+
+.attention__tag {
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  height: fit-content;
+}
+
+.attention__tag--orphan,
+.attention__tag--conflict {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.attention__body {
+  color: var(--gray-800);
+}
+
+.attention__reason {
+  display: block;
+  color: var(--gray-600);
+  font-size: 12px;
+}
+
+/* 編集フォーム */
+
+.field {
+  display: block;
+  margin-top: 12px;
+}
+
+.field__label {
+  display: block;
+  font-size: 12px;
+  color: var(--gray-600);
+  margin-bottom: 4px;
+}
+
+.field__input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--gray-200);
+  border-radius: 7px;
+  font: inherit;
+  background: var(--white);
+  color: var(--gray-800);
+  resize: vertical;
+}
+
+.field__input:focus {
+  outline: 2px solid var(--blue);
+  outline-offset: -1px;
+}
+
+.field__input:disabled {
+  background: var(--gray-50);
+  color: var(--gray-400);
+}
+
 /* ─── バナー ─── */
 
 .banner {

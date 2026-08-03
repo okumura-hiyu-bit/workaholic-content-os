@@ -6,10 +6,12 @@
     <!--
       ★Content-Security-Policy を明示する。
       Rendererは同梱したJS/CSSだけを実行し、外部リソースは読み込まない。
+      media-src に contentos-media: を許可しているのは確認画面のプレビュー音声のため。
+      このスキームは Main が発行したトークンでしか解決されない（任意ファイルは読めない）。
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self';"
+      content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; media-src 'self' contentos-media:;"
     />
     <title>WORKAHOLIC Content OS</title>
   </head>

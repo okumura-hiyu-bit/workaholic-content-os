@@ -10,21 +10,36 @@
  * 同期CPU処理（相互相関など）でウィンドウが固まるのを避けるため。
  */
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
+import { spawn } from 'node:child_process';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, net, protocol, shell } from 'electron';
 
-import { loadProject } from '@contentos/core/project-store';
+import { loadProject, saveProject } from '@contentos/core/project-store';
+import { recordEdit, resolveProject } from '@contentos/core/resolve';
+import { resolveBinary } from '@contentos/media/ffmpeg';
 
 import type { PipelineFinishedEvent, PipelineProgressEvent } from '../shared/dto.ts';
+import { DESKTOP_ERROR_CODES, safeError } from '../shared/errors.ts';
 import { IPC } from '../shared/ipc.ts';
+import type { OpenMediaResult } from '../shared/review-dto.ts';
 import { forkAnalysisProcess } from './analysis-process.ts';
 import { createIpcHandlers } from './ipc.ts';
 import { consoleSink, createLogger } from './logger.ts';
+import {
+  ensurePreview,
+  existingPreview,
+  MEDIA_PROTOCOL,
+  MediaTokenRegistry,
+  tokenFromUrl,
+  type MediaDeps,
+} from './media.ts';
 import { PROJECT_FILE_NAME } from './project.ts';
 import { preflightEnvironment, resolveProjectRoot } from './project-root.ts';
+import type { ProjectLike, ReviewDeps } from './review.ts';
 import { RunManager } from './run-manager.ts';
 
 const logger = createLogger(consoleSink);
@@ -39,6 +54,42 @@ const fsDeps = {
     }
   },
 };
+
+// ─── 再生用プレビュー ──────────────────────────────────
+
+const mediaRegistry = new MediaTokenRegistry(() => randomUUID().replace(/-/g, ''));
+
+const mediaDeps: MediaDeps = {
+  fileExists: fsDeps.fileExists,
+  ensureDir: (path: string) => {
+    mkdirSync(path, { recursive: true });
+  },
+  runFfmpeg: (args: string[]) =>
+    new Promise<void>((resolve, reject) => {
+      const child = spawn(resolveBinary('ffmpeg'), args, { stdio: 'ignore' });
+      child.on('error', reject);
+      child.on('exit', (code) =>
+        code === 0 ? resolve() : reject(new Error(`ffmpeg exited with ${code}`)),
+      );
+    }),
+  registry: mediaRegistry,
+};
+
+/**
+ * `contentos-media://<token>` を実ファイルへ解決する。
+ * ★レジストリに登録済みのパスしか返さない。Rendererは任意のファイルを読めない。
+ */
+function registerMediaProtocol(): void {
+  protocol.handle(MEDIA_PROTOCOL, (request) => {
+    const token = tokenFromUrl(request.url);
+    const path = token !== undefined ? mediaRegistry.resolve(token) : undefined;
+    if (path === undefined) {
+      logger.error('未登録のメディア要求を拒否', { url: request.url });
+      return new Response('not found', { status: 404 });
+    }
+    return net.fetch(pathToFileURL(path).href);
+  });
+}
 
 /** projectRoot は起動時に一度だけ解決し、以後は使い回す。 */
 function resolveRootOnce(): ReturnType<typeof resolveProjectRoot> {
@@ -94,8 +145,57 @@ function wire(window: BrowserWindow): RunManager {
     logger,
   });
 
+  // ★確認画面の依存。core の関数をそのまま渡す（独自の突き合わせを作らない）。
+  const reviewDeps: ReviewDeps = {
+    loadProject: (dir: string) => loadProject(dir) as unknown as { project: ProjectLike; notes?: string[] },
+    saveProject: (dir: string, project: ProjectLike) =>
+      saveProject(dir, project as never),
+    resolveProject: (analysis, edits) =>
+      resolveProject(analysis as never, edits as never) as never,
+    recordEdit: (edits, entry) => recordEdit(edits as never, entry) as never,
+    // 読み込み時は「すでに作ってあるプレビュー」だけを返す（ffmpegを走らせない）。
+    prepareMedia: (project, projectDir) =>
+      existingPreview(project.assets, projectDir, mediaDeps),
+  };
+
   const handlers = createIpcHandlers({
     runManager,
+    review: reviewDeps,
+    async openMedia(projectPath: string): Promise<OpenMediaResult> {
+      try {
+        const { project } = loadProject(projectPath);
+        const media = await ensurePreview(
+          project.assets as never,
+          projectPath,
+          mediaDeps,
+        );
+        if (media === undefined) {
+          return {
+            ok: false,
+            error: safeError(
+              DESKTOP_ERROR_CODES.ENVIRONMENT_NOT_READY,
+              'プレビュー音声を用意できませんでした。',
+              {
+                recoverable: true,
+                suggestedAction:
+                  '素材ファイルが存在するか、ffmpeg が使えるかを確認してください。',
+              },
+            ),
+          };
+        }
+        return { ok: true, media };
+      } catch (error) {
+        logger.error('プレビュー生成に失敗', { error });
+        return {
+          ok: false,
+          error: safeError(
+            DESKTOP_ERROR_CODES.UNKNOWN,
+            'プレビュー音声を用意できませんでした。',
+            { recoverable: true },
+          ),
+        };
+      }
+    },
     fileExists: fsDeps.fileExists,
     loadProject: (dir: string) => loadProject(dir),
     async showProjectDialog() {
@@ -136,12 +236,35 @@ function wire(window: BrowserWindow): RunManager {
     handlers.openProjectFolder(path),
   );
 
+  ipcMain.handle(IPC.reviewLoad, (_e, path: unknown) => handlers.reviewLoad(path));
+  ipcMain.handle(IPC.reviewUpdateSubtitle, (_e, request: unknown) =>
+    handlers.reviewUpdateSubtitle(request),
+  );
+  ipcMain.handle(IPC.reviewRemoveSubtitleEdit, (_e, request: unknown) =>
+    handlers.reviewRemoveSubtitleEdit(request),
+  );
+  ipcMain.handle(IPC.reviewExport, (_e, request: unknown) =>
+    handlers.reviewExport(request),
+  );
+  ipcMain.handle(IPC.reviewOpenMedia, (_e, path: unknown) =>
+    handlers.reviewOpenMedia(path),
+  );
+
   return runManager;
 }
 
 let runManager: RunManager | undefined;
 
+// カスタムプロトコルは app.ready より前に特権を宣言する必要がある。
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: MEDIA_PROTOCOL,
+    privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true },
+  },
+]);
+
 void app.whenReady().then(() => {
+  registerMediaProtocol();
   const root = resolveRootOnce();
   if (root.ok) {
     logger.info('実行環境を解決', {

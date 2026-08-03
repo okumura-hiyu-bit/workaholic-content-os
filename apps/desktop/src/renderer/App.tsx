@@ -14,6 +14,7 @@ import { useCallback, useEffect, useReducer, useState, type JSX } from 'react';
 
 import { STEP_LABELS } from '../shared/steps.ts';
 import { formatDateTime, formatElapsed, percent, shortenPath } from './format.ts';
+import { ReviewScreen } from './ReviewScreen.tsx';
 import {
   canCancel,
   canStart,
@@ -38,6 +39,8 @@ function ErrorBanner({ state }: { state: AppState }): JSX.Element | null {
 export function App(): JSX.Element {
   const [state, dispatch] = useReducer(reducer, initialState);
   const [now, setNow] = useState(() => Date.now());
+  // 今回追加した確認画面。解析画面と切り替える。
+  const [screen, setScreen] = useState<'pipeline' | 'review'>('pipeline');
 
   // ★購読は1回だけ。解除関数をクリーンアップで必ず呼ぶ。
   useEffect(() => {
@@ -111,6 +114,13 @@ export function App(): JSX.Element {
       </header>
 
       <main className="app__main">
+        {screen === 'review' && state.summary !== undefined ? (
+          <ReviewScreen
+            summary={state.summary}
+            onBack={() => setScreen('pipeline')}
+          />
+        ) : (
+          <>
         <ErrorBanner state={state} />
 
         {state.phase === 'idle' && (
@@ -175,6 +185,15 @@ export function App(): JSX.Element {
                   disabled={!canStart(state)}
                 >
                   {state.phase === 'finished' ? 'もう一度解析' : '解析開始'}
+                </button>
+              )}
+              {state.phase !== 'running' && (
+                <button
+                  type="button"
+                  className="btn btn--secondary"
+                  onClick={() => setScreen('review')}
+                >
+                  字幕を確認・修正
                 </button>
               )}
               {state.phase === 'running' && (
@@ -325,6 +344,8 @@ export function App(): JSX.Element {
               </button>
             </div>
           </section>
+        )}
+          </>
         )}
       </main>
     </div>

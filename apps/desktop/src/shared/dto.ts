@@ -13,6 +13,15 @@
  */
 
 import type { StepId, StepStatus, SyncModeDto } from './steps.ts';
+import type {
+  OpenMediaResult,
+  RemoveSubtitleEditRequest,
+  ReviewExportRequest,
+  ReviewExportResult,
+  ReviewLoadResult,
+  SaveSubtitleEditResult,
+  UpdateSubtitleEditRequest,
+} from './review-dto.ts';
 
 // ─── エラー ────────────────────────────────────────────
 
@@ -138,6 +147,17 @@ export interface ContentOsDesktopApi {
   startPipeline(request: StartPipelineRequest): Promise<PipelineStartResult>;
   cancelPipeline(runId: string): Promise<CancelPipelineResult>;
   openProjectFolder(projectPath: string): Promise<void>;
+
+  /** 確認画面（Review）。今回は字幕のみ。 */
+  reviewLoad(projectPath: string): Promise<ReviewLoadResult>;
+  reviewUpdateSubtitle(
+    request: UpdateSubtitleEditRequest,
+  ): Promise<SaveSubtitleEditResult>;
+  reviewRemoveSubtitleEdit(
+    request: RemoveSubtitleEditRequest,
+  ): Promise<SaveSubtitleEditResult>;
+  reviewExport(request: ReviewExportRequest): Promise<ReviewExportResult>;
+  reviewOpenMedia(projectPath: string): Promise<OpenMediaResult>;
 
   /** 戻り値は購読解除関数。Reactのアンマウント時に必ず呼ぶこと。 */
   onPipelineProgress(
