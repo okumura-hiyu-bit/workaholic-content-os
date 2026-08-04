@@ -455,8 +455,64 @@ function timeKey(seconds: number): string {
   return String(Math.max(0, Math.round(seconds * 1000))).padStart(8, '0');
 }
 
-export function subtitleId(startSec: number): string {
-  return `sub-${timeKey(startSec)}`;
+/**
+ * 字幕のID。
+ *
+ * ★同じ開始時刻のキューが複数あるときだけ、2件目以降に連番を付ける。
+ *
+ * ```
+ * sub-00020960      1件目（従来と同じID）
+ * sub-00020960-2    2件目
+ * sub-00020960-3    3件目
+ * ```
+ *
+ * 1件目のIDを変えないのが要点。字幕IDは人間の修正（`edits.subtitles`）の
+ * キーなので、一括で振り直すと保存済みの修正がすべて孤立する。
+ * 連番が付くのは「これまでIDが衝突していて修正を保存できなかった側」だけで、
+ * そこに既存の修正は存在し得ない。
+ *
+ * @param occurrence 同じ開始時刻の中で何件目か（1始まり）。既定は1。
+ */
+export function subtitleId(startSec: number, occurrence = 1): string {
+  const base = `sub-${timeKey(startSec)}`;
+  return occurrence <= 1 ? base : `${base}-${occurrence}`;
+}
+
+/**
+ * 字幕キューの並びに対して、一意なIDを順番に割り当てる。
+ *
+ * ★入力順に対して決定的。同じ入力からは毎回同じIDが返る
+ * （出現順に数えるだけで、ソートや時刻以外の情報を使わない）。
+ * 再解析のたびに `-2` と `-3` が入れ替わると、その分の修正が
+ * 別のキューに付いてしまうため、ここは順序に依存させる。
+ */
+export function assignSubtitleIds(
+  cues: readonly { startSec: number }[],
+): string[] {
+  const seen = new Map<string, number>();
+  return cues.map((cue) => {
+    const base = `sub-${timeKey(cue.startSec)}`;
+    const occurrence = (seen.get(base) ?? 0) + 1;
+    seen.set(base, occurrence);
+    return subtitleId(cue.startSec, occurrence);
+  });
+}
+
+/**
+ * 開始時刻が同じキューがあるか（＝連番が付く箇所があるか）を調べる。
+ * ゼロ長キューと並んで、確認画面や警告で知らせるために使う。
+ */
+export function duplicateStartCount(
+  cues: readonly { startSec: number }[],
+): number {
+  const seen = new Set<string>();
+  let duplicates = 0;
+  for (const cue of cues) {
+    const base = timeKey(cue.startSec);
+    if (seen.has(base)) duplicates += 1;
+    seen.add(base);
+  }
+  return duplicates;
 }
 
 export function cameraShotId(startSec: number): string {
@@ -471,11 +527,44 @@ export function chapterId(startSec: number): string {
   return `ch-${timeKey(startSec)}`;
 }
 
-/** IDから時刻（秒）を取り出す。人間修正の再接続で使う。 */
+/**
+ * IDの形： `<prefix>-<8桁以上の数字>` に、任意で `-<連番>` が付く。
+ *
+ * ```
+ * sub-00020960        字幕
+ * sub-00020960-2      字幕（同じ開始時刻の2件目）
+ * shot-00020960       カメラ切替
+ * ch-00020960         チャプター
+ * mk-LAUGH-00020960   マーカー（種別が間に入る）
+ * ```
+ *
+ * ★前から見て時刻部分を取る。末尾の数字を拾う方式だと
+ * `sub-00020960-2` の `2` を時刻と誤読しかねないため、
+ * 先頭にアンカーして構造ごと照合する。
+ */
+const TIME_ID_PATTERN = /^[a-z]+(?:-[A-Za-z_]+)?-(\d{8,})(?:-(\d+))?$/;
+
+/**
+ * IDから時刻（秒）を取り出す。人間修正の再接続で使う。
+ *
+ * ★形式に合わないIDは undefined を返す（誤った時刻に変換しない）。
+ * 再接続は「時刻が近いものへ繋ぐ」処理なので、間違った時刻を返すと
+ * 修正が無関係なキューに付いてしまう。読めないときは繋がないのが正しい。
+ */
 export function timeFromId(id: string): number | undefined {
-  const match = id.match(/(\d{8})$/);
+  const match = TIME_ID_PATTERN.exec(id);
   if (!match) return undefined;
   return Number.parseInt(match[1]!, 10) / 1000;
+}
+
+/**
+ * IDに付いている連番（同じ開始時刻の中で何件目か）を返す。
+ * 連番が無ければ 1。形式外なら undefined。
+ */
+export function occurrenceFromId(id: string): number | undefined {
+  const match = TIME_ID_PATTERN.exec(id);
+  if (!match) return undefined;
+  return match[2] === undefined ? 1 : Number.parseInt(match[2], 10);
 }
 
 /** 不足している素材の役割を返す。素材登録画面の警告に使う。 */

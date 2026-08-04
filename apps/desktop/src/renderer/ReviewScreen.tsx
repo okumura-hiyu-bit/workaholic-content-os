@@ -339,11 +339,28 @@ export function ReviewScreen({
       </section>
 
       {/* ── 孤立・競合 ── */}
-      {(data.orphaned.length > 0 || data.conflicted.length > 0) && (
+      {(data.orphaned.length > 0 ||
+        data.conflicted.length > 0 ||
+        data.ambiguous.length > 0) && (
         <section className="card card--attention">
           <h3 className="card__subtitle">
             要確認：孤立した修正 {data.orphaned.length} 件 / 競合 {data.conflicted.length} 件
+            {data.ambiguous.length > 0 && ` / ID重複への修正 ${data.ambiguous.length} 件`}
           </h3>
+          {data.ambiguous.map((a) => (
+            <div key={a.subtitleId} className="attention">
+              <span className="attention__tag attention__tag--conflict">要確認</span>
+              <span className="attention__body">
+                {formatTimecode(a.approxSec ?? 0)}：同じIDのキューが{a.cueCount}件あり、
+                そこに修正が保存されています。どちらへの修正か判断できないため、
+                自動では移動していません。
+                {a.text !== undefined && <> 内容：「{a.text}」</>}
+                <span className="attention__reason">
+                  もう一度解析すると、キューごとに別のIDが振られて解消します。
+                </span>
+              </span>
+            </div>
+          ))}
           {data.orphaned.map((o) => (
             <div key={o.originalId} className="attention">
               <span className="attention__tag attention__tag--orphan">孤立</span>

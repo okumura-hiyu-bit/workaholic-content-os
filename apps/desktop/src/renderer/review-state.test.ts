@@ -41,6 +41,7 @@ const counts: ReviewCounts = {
   orphaned: 0,
   conflicted: 0,
   duplicateId: 0,
+  ambiguous: 0,
 };
 
 function data(overrides: Partial<ReviewData> = {}): ReviewData {
@@ -63,6 +64,7 @@ function data(overrides: Partial<ReviewData> = {}): ReviewData {
     counts,
     orphaned: [],
     conflicted: [],
+    ambiguous: [],
     timecodeEditingSupported: false,
     ...overrides,
   };

@@ -525,7 +525,7 @@ describe('保存の失敗', () => {
   });
 });
 
-describe('IDが重複する字幕', () => {
+describe('IDが重複する字幕（旧形式プロジェクトとの互換性）', () => {
   const duplicated = (): ProjectLike =>
     projectFixture({
       analysis: {
@@ -536,9 +536,9 @@ describe('IDが重複する字幕', () => {
       },
     });
 
-  it('重複IDを検出する', () => {
+  it('重複IDと件数を検出する', () => {
     expect([...duplicateSubtitleIds(duplicated().analysis!.subtitles)]).toEqual([
-      'sub-00020960',
+      ['sub-00020960', 2],
     ]);
   });
 
@@ -570,6 +570,183 @@ describe('IDが重複する字幕', () => {
     const data = loadOk(setup());
     expect(data.subtitles.every((c) => c.editable)).toBe(true);
     expect(data.counts.duplicateId).toBe(0);
+  });
+
+  it('★連番付きIDなら一意なので編集できる（新形式）', () => {
+    // 再解析後に生成される形。開始時刻は同じでもIDが分かれる。
+    const project = projectFixture({
+      analysis: {
+        subtitles: [
+          { ...subtitleFixture(20.96, 20.96, ['前半'], { speakerId: 'spk_a' }) },
+          {
+            ...subtitleFixture(20.96, 21.12, ['後半'], { speakerId: 'spk_a' }),
+            id: 'sub-00020960-2',
+          },
+        ],
+      },
+    });
+    const store = setup(project);
+    const data = loadOk(store);
+
+    expect(data.subtitles.map((c) => c.id)).toEqual([
+      'sub-00020960',
+      'sub-00020960-2',
+    ]);
+    expect(data.subtitles.every((c) => c.editable)).toBe(true);
+    expect(data.counts.duplicateId).toBe(0);
+
+    // 実際に保存できる
+    const saved = applySubtitleEdit(
+      {
+        projectPath: DIR,
+        subtitleId: 'sub-00020960-2',
+        expectedUpdatedAt: data.updatedAt,
+        patch: { text: '2件目だけを直した' },
+      },
+      store.deps,
+    );
+    expect(saved.ok).toBe(true);
+
+    // ★1件目には影響しない
+    const reloaded = loadOk(store);
+    expect(reloaded.subtitles[0]!.text).toBe('前半');
+    expect(reloaded.subtitles[0]!.edited).toBe(false);
+    expect(reloaded.subtitles[1]!.text).toBe('2件目だけを直した');
+    expect(reloaded.subtitles[1]!.edited).toBe(true);
+  });
+
+  it('★重複IDに修正が付いている異常データを要確認として報告する', () => {
+    const project = duplicated();
+    // 旧形式で保存されてしまった修正を再現する。
+    project.edits.subtitles['sub-00020960'] = { text: 'どちらへの修正か不明' };
+
+    const data = loadOk(setup(project));
+
+    expect(data.counts.ambiguous).toBe(1);
+    expect(data.ambiguous[0]).toMatchObject({
+      subtitleId: 'sub-00020960',
+      cueCount: 2,
+      text: 'どちらへの修正か不明',
+    });
+    // ★自動でどちらかへ移していない（editsは元のまま）
+    expect(Object.keys(project.edits.subtitles)).toEqual(['sub-00020960']);
+  });
+
+  it('重複IDでも修正が無ければ要確認にしない', () => {
+    expect(loadOk(setup(duplicated())).counts.ambiguous).toBe(0);
+  });
+
+  it('★異常データがあっても保存は拒否したままにする', () => {
+    const project = duplicated();
+    project.edits.subtitles['sub-00020960'] = { text: '既存の修正' };
+    const store = setup(project);
+
+    const result = applySubtitleEdit(
+      {
+        projectPath: DIR,
+        subtitleId: 'sub-00020960',
+        expectedUpdatedAt: loadOk(store).updatedAt,
+        patch: { text: 'さらに直す' },
+      },
+      store.deps,
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.error.code).toBe('SUBTITLE_NOT_EDITABLE');
+    expect(store.saveCount()).toBe(0);
+    // 既存の修正は消えていない
+    expect(store.read(DIR).edits.subtitles['sub-00020960']).toEqual({
+      text: '既存の修正',
+    });
+  });
+});
+
+describe('再解析によるID移行（既存editsを壊さないこと）', () => {
+  it('★衝突していない字幕の修正は再解析後もそのまま当たる', () => {
+    const store = setup();
+    applySubtitleEdit(
+      {
+        projectPath: DIR,
+        subtitleId: FIRST,
+        expectedUpdatedAt: loadOk(store).updatedAt,
+        patch: { text: '人が直した本文' },
+      },
+      store.deps,
+    );
+
+    // 再解析：IDの採番方式が変わっても、衝突していないIDは同じまま。
+    const project = store.read(DIR);
+    store.deps.saveProject(DIR, {
+      ...project,
+      analysis: {
+        subtitles: [
+          subtitleFixture(0, 2.5, ['こんばんは'], { speakerId: 'spk_a' }),
+          subtitleFixture(2.5, 5, ['よろしくお願いします'], { speakerId: 'spk_b' }),
+          subtitleFixture(5, 8.25, ['今日のテーマは'], { speakerId: 'spk_a' }),
+        ],
+      },
+    });
+
+    const data = loadOk(store);
+    expect(data.subtitles[0]!.text).toBe('人が直した本文');
+    expect(data.subtitles[0]!.edited).toBe(true);
+    // ★孤立が増えていない
+    expect(data.counts.orphaned).toBe(0);
+  });
+
+  it('★旧形式（重複ID）→新形式（連番）へ再解析すると編集可能になる', () => {
+    // 旧形式：IDが重複していて編集不可
+    const legacy = projectFixture({
+      analysis: {
+        subtitles: [
+          subtitleFixture(20.96, 20.96, ['前半'], { speakerId: 'spk_a' }),
+          subtitleFixture(20.96, 21.12, ['後半'], { speakerId: 'spk_a' }),
+        ],
+      },
+    });
+    const store = setup(legacy);
+    expect(loadOk(store).subtitles.every((c) => c.editable)).toBe(false);
+
+    // 再解析：2件目に連番が付く
+    const project = store.read(DIR);
+    store.deps.saveProject(DIR, {
+      ...project,
+      analysis: {
+        subtitles: [
+          subtitleFixture(20.96, 20.96, ['前半'], { speakerId: 'spk_a' }),
+          {
+            ...subtitleFixture(20.96, 21.12, ['後半'], { speakerId: 'spk_a' }),
+            id: 'sub-00020960-2',
+          },
+        ],
+      },
+    });
+
+    const data = loadOk(store);
+    expect(data.subtitles.every((c) => c.editable)).toBe(true);
+    expect(data.counts.duplicateId).toBe(0);
+    expect(data.counts.orphaned).toBe(0);
+  });
+
+  it('★移行しても edits 以外の領域を変えない', () => {
+    const store = setup();
+    const before = structuredClone(store.read(DIR));
+
+    applySubtitleEdit(
+      {
+        projectPath: DIR,
+        subtitleId: FIRST,
+        expectedUpdatedAt: before.updatedAt,
+        patch: { text: '直した' },
+      },
+      store.deps,
+    );
+
+    const after = store.read(DIR);
+    expect(after.analysis).toEqual(before.analysis);
+    expect(after.speakers).toEqual(before.speakers);
+    expect(after.assets).toEqual(before.assets);
+    expect(after.status).toEqual(before.status);
   });
 });
 

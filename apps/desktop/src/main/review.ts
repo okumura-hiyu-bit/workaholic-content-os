@@ -14,6 +14,7 @@
 import type { ProjectSummary, SafePipelineError } from '../shared/dto.ts';
 import { DESKTOP_ERROR_CODES, safeError } from '../shared/errors.ts';
 import type {
+  ReviewAmbiguousEdit,
   ReviewConflictedEdit,
   ReviewCounts,
   ReviewData,
@@ -183,24 +184,62 @@ export function detectSubtitleConflicts(
   return conflicts;
 }
 
-/** 同じIDのキューが複数あるIDの集合。 */
+/**
+ * 同じIDのキューが複数あるIDと、その件数。
+ *
+ * ★新しく生成された字幕は連番付きで一意になるため、通常は空になる。
+ * 旧形式のプロジェクトを開いたときの互換性のために残している。
+ */
 export function duplicateSubtitleIds(
   subtitles: readonly { id: string }[],
-): Set<string> {
-  const seen = new Set<string>();
-  const duplicated = new Set<string>();
+): Map<string, number> {
+  const counts = new Map<string, number>();
   for (const cue of subtitles) {
-    if (seen.has(cue.id)) duplicated.add(cue.id);
-    seen.add(cue.id);
+    counts.set(cue.id, (counts.get(cue.id) ?? 0) + 1);
+  }
+  const duplicated = new Map<string, number>();
+  for (const [id, count] of counts) {
+    if (count > 1) duplicated.set(id, count);
   }
   return duplicated;
+}
+
+/**
+ * ★異常データの検出：IDが重複しているキューに、すでに修正が保存されている。
+ *
+ * この修正は同じIDの全キューに適用されてしまうが、本来どちらに対する
+ * 修正だったのかは決められない。自動でどちらかへ移し替えると誤った字幕を
+ * 確定させるので、移さずに「要確認」として返す。
+ */
+export function detectAmbiguousEdits(
+  analysisSubtitles: readonly AnalysisSubtitleLike[],
+  edits: EditsLike,
+  duplicated: ReadonlyMap<string, number>,
+): ReviewAmbiguousEdit[] {
+  const firstById = new Map<string, AnalysisSubtitleLike>();
+  for (const cue of analysisSubtitles) {
+    if (!firstById.has(cue.id)) firstById.set(cue.id, cue);
+  }
+
+  const ambiguous: ReviewAmbiguousEdit[] = [];
+  for (const [id, count] of duplicated) {
+    const edit = edits.subtitles[id];
+    if (edit === undefined) continue;
+    const item: ReviewAmbiguousEdit = { subtitleId: id, cueCount: count };
+    const cue = firstById.get(id);
+    if (cue !== undefined) item.approxSec = cue.startSec;
+    if (edit.text !== undefined) item.text = edit.text;
+    if (edit.speakerId !== undefined) item.speakerId = edit.speakerId;
+    ambiguous.push(item);
+  }
+  return ambiguous;
 }
 
 function toReviewCue(
   resolved: ResolvedSubtitleLike,
   analysisById: Map<string, AnalysisSubtitleLike>,
   conflictedIds: ReadonlySet<string>,
-  duplicatedIds: ReadonlySet<string>,
+  duplicatedIds: ReadonlyMap<string, number>,
 ): ReviewSubtitleCue {
   const analysis = analysisById.get(resolved.id);
   const words = resolved.lowConfidenceWords ?? [];
@@ -263,6 +302,7 @@ function countsOf(
   cues: readonly ReviewSubtitleCue[],
   orphaned: readonly unknown[],
   conflicted: readonly unknown[],
+  ambiguous: readonly unknown[],
 ): ReviewCounts {
   return {
     cues: cues.length,
@@ -271,6 +311,7 @@ function countsOf(
     orphaned: orphaned.length,
     conflicted: conflicted.length,
     duplicateId: cues.filter((c) => c.duplicateId).length,
+    ambiguous: ambiguous.length,
   };
 }
 
@@ -335,6 +376,11 @@ export function buildReviewData(
   const conflicted = detectSubtitleConflicts(analysis.subtitles, project.edits);
   const conflictedIds = new Set(conflicted.map((c) => c.subtitleId));
   const duplicatedIds = duplicateSubtitleIds(analysis.subtitles);
+  const ambiguous = detectAmbiguousEdits(
+    analysis.subtitles,
+    project.edits,
+    duplicatedIds,
+  );
 
   const subtitles = result.resolved.subtitles.map((cue) =>
     toReviewCue(cue, analysisById, conflictedIds, duplicatedIds),
@@ -352,9 +398,10 @@ export function buildReviewData(
     updatedAt: project.updatedAt,
     speakers,
     subtitles,
-    counts: countsOf(subtitles, orphaned, conflicted),
+    counts: countsOf(subtitles, orphaned, conflicted, ambiguous),
     orphaned,
     conflicted,
+    ambiguous,
     timecodeEditingSupported: false,
   };
 

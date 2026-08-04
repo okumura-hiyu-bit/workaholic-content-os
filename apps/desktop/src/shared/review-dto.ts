@@ -67,6 +67,27 @@ export interface ReviewOrphanedEdit {
   speakerId?: string;
 }
 
+/**
+ * ★異常データ：IDが重複しているキューに、すでに修正が保存されている。
+ *
+ * 修正は `resolveProject` によって同じIDの**全キューに適用される**ため、
+ * どちらに対する修正だったのかを機械的には決められない。
+ * 自動でどちらかへ寄せると誤った字幕を確定させてしまうので、
+ * 移し替えずに「要確認」として提示する。
+ *
+ * 新しく生成された字幕は連番付きIDで一意になるため、
+ * この状態が起きるのは旧形式のプロジェクトだけ。再解析すれば解消する。
+ */
+export interface ReviewAmbiguousEdit {
+  subtitleId: string;
+  /** 同じIDを持つキューの数。 */
+  cueCount: number;
+  approxSec?: number;
+  /** 保存されている修正の中身。 */
+  text?: string;
+  speakerId?: string;
+}
+
 /** 修正後に解析結果が変わったもの。人間修正は保持されるが、確認を促す。 */
 export interface ReviewConflictedEdit {
   subtitleId: string;
@@ -100,6 +121,8 @@ export interface ReviewCounts {
   conflicted: number;
   /** IDが重複していて編集できないキューの数。 */
   duplicateId: number;
+  /** ★重複IDに修正が保存されている異常データの数（要確認）。 */
+  ambiguous: number;
 }
 
 export interface ReviewData {
@@ -111,6 +134,8 @@ export interface ReviewData {
   counts: ReviewCounts;
   orphaned: ReviewOrphanedEdit[];
   conflicted: ReviewConflictedEdit[];
+  /** ★重複IDに修正が付いている異常データ。自動で移し替えず提示する。 */
+  ambiguous: ReviewAmbiguousEdit[];
   /** 生成できなかった場合は undefined（解析前・ffmpeg未導入など）。 */
   media?: ReviewMedia;
   /** ★今回はタイムコード編集に未対応。画面に明記するためのフラグ。 */

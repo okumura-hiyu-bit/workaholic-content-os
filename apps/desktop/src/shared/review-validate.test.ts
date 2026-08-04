@@ -30,13 +30,29 @@ describe('validateSubtitleId', () => {
     expect(validateSubtitleId('sub-00020960').ok).toBe(true);
   });
 
+  it('★連番付きIDを受け入れる（同じ開始時刻の2件目以降）', () => {
+    expect(validateSubtitleId('sub-00020960-2').ok).toBe(true);
+    expect(validateSubtitleId('sub-00020960-3').ok).toBe(true);
+  });
+
+  it('★2桁以上の連番も受け入れる', () => {
+    expect(validateSubtitleId('sub-00020960-12').ok).toBe(true);
+    expect(validateSubtitleId('sub-00020960-100').ok).toBe(true);
+  });
+
   it('★不正な字幕IDを拒否する', () => {
     for (const value of [
       'shot-00000000',
       'sub-',
+      'sub-123',
       'sub-abcdefgh',
       '../../etc/passwd',
       'sub-00000000; rm -rf /',
+      // 連番の形が不正なもの
+      'sub-00020960-',
+      'sub-00020960-x',
+      'sub-00020960-2-3',
+      'sub-00020960--2',
       '',
       null,
       undefined,

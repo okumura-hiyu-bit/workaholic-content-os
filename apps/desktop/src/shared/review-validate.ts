@@ -20,8 +20,16 @@ export const MAX_SUBTITLE_LENGTH = 500;
 /** 1キューの最大行数。 */
 export const MAX_SUBTITLE_LINES = 8;
 
-/** `sub-000012340` のような形。resolve側のID規則に合わせる。 */
-const SUBTITLE_ID = /^sub-[0-9]{1,12}$/;
+/**
+ * 字幕IDの形。`packages/core` の `subtitleId()` に合わせる。
+ *
+ * ```
+ * sub-00020960        通常
+ * sub-00020960-2      同じ開始時刻の2件目（連番付き）
+ * sub-00020960-12     連番は2桁以上もありうる
+ * ```
+ */
+const SUBTITLE_ID = /^sub-[0-9]{8,12}(?:-[0-9]{1,4})?$/;
 /** 話者IDに許す文字。 */
 const SPEAKER_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 /** ISO 8601（project-store が updatedAt に書く形）。 */
