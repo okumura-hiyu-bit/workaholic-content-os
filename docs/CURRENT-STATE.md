@@ -1,6 +1,8 @@
 # CURRENT STATE — 引き継ぎドキュメント
 
 > 作成日: 2026-07-30 / 最終更新: 2026-08-04（Step 1「土台整理」、Step 2「Electron骨組み + IPC」、Step 3「確認画面：字幕」、Step 4「字幕ID重複の解消」、Step 5「プロジェクト一覧・新規作成・素材登録」を反映）。この内容は会話の要約ではなく、**実際のリポジトリ・テスト結果・型チェック結果を根拠に**作成しています。数値は必ず次回セッション側でも再確認してください（本ファイル末尾のコマンド）。
+>
+> **Step 1〜5はすべてコミット済み**（最新: `ab322ff`）。ワーキングツリーに未コミットの実装は残っていません。
 
 ---
 
@@ -280,7 +282,7 @@ sub-00020960-3    3件目
 | 機能 | 実装場所 | 確認状況 |
 |---|---|---|
 | ウィンドウ生成・Electron配線 | `apps/desktop/src/main/index.ts` | 実機（起動・Reactマウントを確認） |
-| Preload（contextBridgeで7APIのみ公開） | `apps/desktop/src/preload/{index,api}.ts` | テスト（8件）＋実機（公開キーと`require`等の不在を確認） |
+| Preload（contextBridgeで21APIのみ公開） | `apps/desktop/src/preload/{index,api}.ts` | テスト（8件）＋実機（公開キーと`require`等の不在を確認） |
 | IPCハンドラ（検証・事前チェック・排他の統合） | `apps/desktop/src/main/ipc.ts` | テスト（20件）＋実機 |
 | 入力検証（パス・工程ID・同期モード・runId） | `apps/desktop/src/shared/validate.ts` | テスト（21件）＋実機（不正入力3種の拒否を確認） |
 | project.json の読み取りと拒否 | `apps/desktop/src/main/project.ts` | テスト（16件）＋実機 |
@@ -371,10 +373,10 @@ Test Files  38 passed (38)
   npm run selfcheck
   npm run build
   ```
-- **workspace import 移行後（2026-08-01）に再確認した内容**：型チェック エラー0件、テスト 19ファイル/462件すべてpass（移行前と同一件数）、`npm run pipeline -- --help` が15工程を正常に列挙、`npm run build` 成功。加えて **`--experimental-strip-types` を付けない素の `node` で `dist/pipeline.js`・`dist/core.js` を読み込み、`runPipeline` の取得・15工程の確認・`createProject()`／`resolveProject()` の実行に成功**（＝Electronメインプロセスから解析を呼べることの前提条件を実証済み）。
+- **workspace import 移行後（2026-08-01）に再確認した内容**：型チェック エラー0件、テスト 19ファイル/462件すべてpass（★当時の件数。移行前と同一で、移行がロジックを変えていないことの根拠。現在は38ファイル/918件）、`npm run pipeline -- --help` が15工程を正常に列挙、`npm run build` 成功。加えて **`--experimental-strip-types` を付けない素の `node` で `dist/pipeline.js`・`dist/core.js` を読み込み、`runPipeline` の取得・15工程の確認・`createProject()`／`resolveProject()` の実行に成功**（＝Electronメインプロセスから解析を呼べることの前提条件を実証済み）。
 - **Electron実機確認（2026-08-01）**：`.selfcheck` のfixtureから作った実プロジェクト（5素材・40秒）に対して、**実際にElectronアプリを起動し、Chrome DevTools Protocol でRendererを操作して**以下を確認した。
   1. アプリ起動・ウィンドウ生成・Reactのマウント（未選択画面の描画）
-  2. `window.contentOs` が公開しているキーがちょうど7つ（`selectProject` / `readProjectSummary` / `startPipeline` / `cancelPipeline` / `openProjectFolder` / `onPipelineProgress` / `onPipelineFinished`）
+  2. `window.contentOs` が公開しているキーがちょうど7つ（`selectProject` / `readProjectSummary` / `startPipeline` / `cancelPipeline` / `openProjectFolder` / `onPipelineProgress` / `onPipelineFinished`）**※これは2026-08-01時点の記録。現在は21個**（Step 3で5個、Step 5で9個を追加。最新の一覧は `preload/api.ts` の `ALLOWED_API_KEYS` が唯一の正）
   3. **Rendererから `window.require` / `window.process` / `window.module` / `window.ipcRenderer` がすべて `undefined`**（contextIsolation + sandbox が効いている）
   4. `readProjectSummary` が案件名・ID・パス・ステータス・素材数・最終更新を返す
   5. 不正入力の拒否：相対パス・未知の工程ID（`rm -rf /`）・不正なrunId（`../../etc/passwd`）がすべて `INVALID_REQUEST` で拒否され、解析プロセスは起動しない
@@ -455,7 +457,7 @@ Electron GUIの前提となる構成の整理を実施済み。**ロジックの
 - クロスパッケージの相対パス越境を全廃し、workspace import（`@contentos/*`）へ移行
 - 各 `package.json` の `exports` と `dependencies` を実態に合わせて整理（依存の向きが構造で強制される状態に）
 - `tsup` によるビルド方式を整備し、素の `node` で `dist/` が動作することを実証
-- 型チェック エラー0件・テスト462件すべてpassを維持
+- 型チェック エラー0件・テスト462件すべてpassを維持（当時の件数）
 
 詳細は「2. 現在のアーキテクチャ」の各サブセクションを参照。
 
@@ -464,7 +466,7 @@ Electron GUIの前提となる構成の整理を実施済み。**ロジックの
 解析の「選択 → 開始 → 進捗 → 中止 → 完了 → フォルダを開く」までを1画面で操作できる最小構成。**`packages/*` のロジックは一切変更していない**（変更は `apps/desktop/` の新規追加と、ルートの `package.json` スクリプトのみ）。
 
 - Main / Preload / Renderer / Shared DTO / 解析専用プロセス の5層に分離
-- `contextIsolation: true` / `nodeIntegration: false` / `sandbox: true`。Preloadは7つのAPIだけを公開
+- `contextIsolation: true` / `nodeIntegration: false` / `sandbox: true`。Preloadは7つのAPIだけを公開（★Step 2時点の数。Step 3・Step 5の追加を経て現在は21個）
 - 解析は `child_process.fork` の別プロセスで実行（メインプロセスを塞がない）
 - Rendererからの入力（パス・工程ID・同期モード・runId）をMain側で必ず検証
 - 二重実行防止はElectron層のみで実装（`run-pipeline.ts` は無変更）
@@ -506,14 +508,17 @@ Electron GUIの前提となる構成の整理を実施済み。**ロジックの
 
 `packages/core` の `ASSET_ROLES` に `logo` を1件追加した（要求された素材種別のうち唯一存在しなかったため）。既存プロジェクトに `logo` の素材は無いので後方互換。
 
+**コミット済み**：`ab322ff feat: add project setup and media registration workflow`（24ファイル / +4470行）。コミット前に型チェック・全テスト・ビルド・CLI回帰（`--help` が15工程を列挙）・Review回帰（196件）を実施し、元素材の非変更（`.selfcheck` のfixtureがmtime不変）と `project.analysis` / `project.edits` の非変更を確認済み。
+
 ### 次の実装
 
 1. **確認画面 — カメラ切替の修正**（`edits.cameraShots` は `overrides` / `inserted` / `deletedIds` の3構造。字幕より複雑）
 2. **確認画面 — ショート候補の採否**（`edits.shorts`。IDに時刻を含まないため、候補が変われば必ず `orphaned` になる仕様）
 3. **孤立修正の再接続UI**（現在は一覧表示のみ。「この修正をこのキューに付け直す」操作はまだ無い）
-4. **プロジェクト一覧・素材登録画面**（現在は project.json を直接選ぶ方式）
-5. 書き出し画面
-6. AI設定（ローカルモードで配線 → GeminiProvider）
+4. 書き出し画面
+5. AI設定（ローカルモードで配線 → GeminiProvider）
+
+※「プロジェクト一覧・素材登録画面」はStep 5で実装済み（`project.json` を直接選ぶ方式は残してあるが、既定の入口は一覧になった）。
 
 **★保留中の課題**
 
@@ -524,7 +529,7 @@ Electron GUIの前提となる構成の整理を実施済み。**ロジックの
 
 ## 8. 次回セッション開始時の確認コマンド
 
-⚠️ **このリポジトリは git 管理下にある**（2026-08-01 時点。ブランチ `master`）。ただし**親ディレクトリ `Cloude Code ファイル/` 自体も別のgitリポジトリ**（ブランチ `main`・コミット0件）になっており、リポジトリが入れ子になっている。gitコマンドを打つ前に、必ず `workaholic-content-os/` に `cd` してから実行し、対象リポジトリを取り違えないこと。
+⚠️ **このリポジトリは git 管理下にある**（2026-08-04 時点。ブランチ `master`・リモート未設定）。ただし**親ディレクトリ `Cloude Code ファイル/` 自体も別のgitリポジトリ**（ブランチ `main`・コミット0件）になっており、リポジトリが入れ子になっている。gitコマンドを打つ前に、必ず `workaholic-content-os/` に `cd` してから実行し、対象リポジトリを取り違えないこと。特に `git add -A` は親リポジトリで実行すると `node_modules/` や `.venv/`、ホーム配下のファイルまで巻き込むため、**必ずパスを明示してステージする**こと。
 
 ```bash
 # 1. 作業ディレクトリの確認（★親も別リポジトリなので必ずcdする）
@@ -534,6 +539,12 @@ cd "/Users/kishimototaishi/Desktop/Cloude Code ファイル/workaholic-content-o
 git status
 git log --oneline -5
 git diff --stat
+# → 2026-08-04 時点の最新5件（この5件がStep 1〜5に対応する）：
+#   ab322ff feat: add project setup and media registration workflow   ← Step 5
+#   c7dd425 fix: ensure unique and backward-compatible subtitle IDs    ← Step 4
+#   57af003 feat: add subtitle review and safe edit workflow           ← Step 3
+#   e518367 feat: add Electron desktop pipeline control MVP            ← Step 2
+#   dbe3033 refactor: establish workspace package boundaries and build pipeline ← Step 1
 
 # 3. 依存の導入（workspace のシンボリックリンクを張るため、clone直後は必須）
 npm install
@@ -543,7 +554,7 @@ npm install
 # 4. 型チェック（エラー0件が正常）
 npm run typecheck
 
-# 5. 全テスト（本ファイル更新時点で 19 files / 462 tests / 全pass）
+# 5. 全テスト（本ファイル更新時点で 38 files / 918 tests / 全pass）
 npm test
 
 # 6. ビルド（dist/ と apps/desktop/dist/ の生成。どちらも .gitignore 済み）

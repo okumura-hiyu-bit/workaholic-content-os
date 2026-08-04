@@ -87,10 +87,10 @@ Premiereで ep012.fcp7.xml を開く
 | **音声同期**（相互相関） | ✅ 実装済み（[audio-sync.ts](../packages/editing/src/audio-sync.ts)）合成素材で誤差0ms |
 | **話者判定**（相槌・同時発話・沈黙） | ✅ 実装済み（[speaker-detect.ts](../packages/editing/src/speaker-detect.ts)） |
 | 笑い候補の検出 | ⚠️ **補助判定**。低確信度はカメラ切替に使わずマーカーのみ。実素材での閾値調整が必要 |
-| 音声補正（非破壊・上書き防止） | ✅ 実装済み（[audio-correct.ts](../packages/media/src/audio-correct.ts)） |
+| **音声補正**（非破壊・ノイズ低減・ラウドネス正規化） | ✅ 実装済み（[audio-correct.ts](../packages/media/src/audio-correct.ts)）。★原音は上書きしない（入力パス＝出力パスなら実行前に例外）。補正音は別ファイルとして生成し、XMLでは原音を有効トラック・補正音をミュートトラックで出力 |
 | ffmpeg連携（尺取得・音声デコード） | ✅ 実装済み（[ffmpeg.ts](../packages/media/src/ffmpeg.ts)） |
 | **パイプライン自己検証** | ✅ 全10項目合格（[記録](./measurements/selfcheck-synthetic.md)） |
-| テスト | ✅ **462件パス** |
+| テスト | ✅ **918件パス**（38ファイル。内訳：コア 498件＋Electron 420件） |
 | **Premiereでの実機検証** | ⏳ 実施待ち（[検証ガイド](./measurements/premiere-check-guide.md)） |
 | **文字起こし（faster-whisper）** | ✅ 実装済み（[transcribe.ts](../packages/media/src/transcribe.ts)）。実音声で検証済み（[記録](./measurements/whisper-model-comparison.md)） |
 | 同期モード（preserve / common） | ✅ 実装済み |
@@ -103,5 +103,12 @@ Premiereで ep012.fcp7.xml を開く
 | **ショート候補の一次抽出** | ✅ 実装済み（[short-candidates.ts](../packages/editing/src/short-candidates.ts)） |
 | **解析オーケストレーション（packages/pipeline・15工程）** | ✅ 実装済み・実機（ffmpeg+whisper）で動作確認済み（[docs/14-pipeline.md](./14-pipeline.md)） |
 | **CLI（npm run pipeline）** | ✅ 実装済み・実機確認済み（通常出力／--json-progress／部分実行／キャッシュ） |
-| Electron + React | 次に着手（Premiere検証後） |
-| 音声補正（非破壊） | 次に着手（Step 4） |
+| **Electron + React（デスクトップアプリ）** | ✅ 実装済み・実機確認済み（解析の選択→開始→進捗→中止→完了。解析は別プロセスで実行） |
+| **プロジェクト一覧・新規作成・素材登録** | ✅ 実装済み・実機確認済み（一覧は参照情報のみ保存。**素材は読むだけで移動・コピーしない**） |
+| **確認画面（字幕の確認・修正・部分再出力）** | ✅ 実装済み・実機確認済み。⚠️ タイムコード編集は未対応。話者の修正は成果物へ未反映（Premiere実機検証待ち） |
+| 確認画面（カメラ切替・ショート候補の採否） | ⏳ 未着手（次の実装。[CURRENT-STATE.md](./CURRENT-STATE.md) の「7. 次のタスク」参照） |
+| 書き出し画面 / AI設定（Gemini・OpenAI本接続） | ⏳ 未着手 |
+
+> 実装の進捗・詳細・未検証事項は [CURRENT-STATE.md](./CURRENT-STATE.md) が唯一の正です。
+> ⚠️ 本ファイルの「Phase 1/2/3」と CURRENT-STATE.md の「Step 1〜5」は**別の区分**です。
+> Phase は機能範囲の段階（[08-mvp-and-steps.md](./08-mvp-and-steps.md)）、Step は実装した順番を指します。
