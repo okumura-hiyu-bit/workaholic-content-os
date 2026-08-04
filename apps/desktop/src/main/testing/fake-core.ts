@@ -10,6 +10,7 @@
 import { recordEdit, resolveProject } from '@contentos/core/resolve';
 
 import type {
+  AnalysisShortCandidateLike,
   AnalysisSubtitleLike,
   EditsLike,
   ProjectLike,
@@ -50,6 +51,38 @@ export function subtitleFixture(
   return cue;
 }
 
+/**
+ * ショート候補のfixture。
+ * IDは `packages/editing/short-candidates.ts` と同じ `short_NN` 形式で作る
+ * （検証の正規表現と食い違うと、テストだけが通ってしまうため）。
+ */
+export function shortCandidateFixture(
+  index: number,
+  startSec: number,
+  endSec: number,
+  options: {
+    score?: number;
+    signals?: string[];
+    primarySpeakerId?: string;
+    transcriptExcerpt?: string;
+  } = {},
+): AnalysisShortCandidateLike {
+  const candidate: AnalysisShortCandidateLike = {
+    id: `short_${String(index).padStart(2, '0')}`,
+    startSec,
+    endSec,
+    score: options.score ?? 50,
+    signals: options.signals ?? ['笑い'],
+  };
+  if (options.primarySpeakerId !== undefined) {
+    candidate.primarySpeakerId = options.primarySpeakerId;
+  }
+  if (options.transcriptExcerpt !== undefined) {
+    candidate.transcriptExcerpt = options.transcriptExcerpt;
+  }
+  return candidate;
+}
+
 export function projectFixture(
   overrides: Partial<ProjectLike> = {},
 ): ProjectLike {
@@ -84,6 +117,16 @@ export function projectFixture(
           speakerId: 'spk_a',
           lowConfidenceWords: [{ text: 'テーマ', probability: 0.52 }],
         }),
+      ],
+      shortCandidates: [
+        shortCandidateFixture(1, 2, 32, {
+          score: 82,
+          signals: ['笑い', '強調'],
+          primarySpeakerId: 'spk_a',
+          transcriptExcerpt: 'ここが盛り上がった部分です',
+        }),
+        shortCandidateFixture(2, 40, 70, { score: 61, signals: ['話題の切り替わり'] }),
+        shortCandidateFixture(3, 90, 105, { score: 44, signals: ['強調'] }),
       ],
     },
     edits: emptyEditsFixture(),

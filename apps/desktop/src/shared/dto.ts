@@ -24,6 +24,14 @@ import type {
   UpdateAssetRequest,
 } from './setup-dto.ts';
 import type {
+  RemoveShortDecisionRequest,
+  SaveShortDecisionResult,
+  ShortsExportRequest,
+  ShortsExportResult,
+  ShortsLoadResult,
+  UpdateShortDecisionRequest,
+} from './shorts-dto.ts';
+import type {
   OpenMediaResult,
   RemoveSubtitleEditRequest,
   ReviewExportRequest,
@@ -168,6 +176,19 @@ export interface ContentOsDesktopApi {
   ): Promise<SaveSubtitleEditResult>;
   reviewExport(request: ReviewExportRequest): Promise<ReviewExportResult>;
   reviewOpenMedia(projectPath: string): Promise<OpenMediaResult>;
+
+  /**
+   * ショート候補の確認・採否。
+   * ★再出力は save-artifacts のみ。FCP7 XML は作り直さない。
+   */
+  shortsLoad(projectPath: string): Promise<ShortsLoadResult>;
+  shortsUpdateDecision(
+    request: UpdateShortDecisionRequest,
+  ): Promise<SaveShortDecisionResult>;
+  shortsRemoveDecision(
+    request: RemoveShortDecisionRequest,
+  ): Promise<SaveShortDecisionResult>;
+  shortsExport(request: ShortsExportRequest): Promise<ShortsExportResult>;
 
   /** プロジェクト一覧・新規作成・素材登録。 */
   listProjects(): Promise<ProjectListResult>;

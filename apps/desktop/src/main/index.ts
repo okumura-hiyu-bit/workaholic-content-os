@@ -370,6 +370,17 @@ function wire(window: BrowserWindow): RunManager {
     handlers.reviewOpenMedia(path),
   );
 
+  ipcMain.handle(IPC.shortsLoad, (_e, path: unknown) => handlers.shortsLoad(path));
+  ipcMain.handle(IPC.shortsUpdateDecision, (_e, request: unknown) =>
+    handlers.shortsUpdateDecision(request),
+  );
+  ipcMain.handle(IPC.shortsRemoveDecision, (_e, request: unknown) =>
+    handlers.shortsRemoveDecision(request),
+  );
+  ipcMain.handle(IPC.shortsExport, (_e, request: unknown) =>
+    handlers.shortsExport(request),
+  );
+
   ipcMain.handle(IPC.listProjects, () => handlers.listProjects());
   ipcMain.handle(IPC.createProject, (_e, request: unknown) =>
     handlers.createProject(request),

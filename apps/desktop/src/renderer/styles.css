@@ -817,3 +817,76 @@ body {
   background: var(--warn-soft);
   color: var(--warn);
 }
+
+/* ─── ショート候補Review ─── */
+
+/* ★再解析の警告。消せない位置に置くので、エラーとは別トーンにする。 */
+.banner--warn {
+  background: var(--warn-soft);
+  border: 1px solid #eccb92;
+}
+
+.stat__value--adopted {
+  color: var(--ok);
+}
+
+/* 緑系＝採用 */
+.cues__item--adopted .cues__button {
+  border-left-color: var(--ok);
+}
+
+/* グレー系＝不採用（薄くして採用と見分ける） */
+.cues__item--rejected .cues__button {
+  border-left-color: var(--gray-200);
+  opacity: 0.72;
+}
+
+.tag--adopted {
+  background: #e4f3ea;
+  color: var(--ok);
+}
+
+.tag--rejected {
+  background: var(--gray-100);
+  color: var(--gray-600);
+}
+
+.shorts__list .cues__button {
+  grid-template-columns: 190px 60px 1fr auto;
+}
+
+.shorts__dur {
+  font-size: 11px;
+  color: var(--gray-600);
+  font-variant-numeric: tabular-nums;
+}
+
+.shorts__score {
+  font-size: 11px;
+  color: var(--gray-400);
+  font-variant-numeric: tabular-nums;
+}
+
+.shorts__excerpt {
+  white-space: pre-wrap;
+}
+
+/* 絞り込みチップ */
+.filters {
+  display: flex;
+  gap: 6px;
+}
+
+.btn--chip {
+  padding: 4px 12px;
+  font-size: 12px;
+  background: var(--white);
+  color: var(--gray-600);
+  border: 1px solid var(--gray-200);
+}
+
+.btn--chip-active {
+  background: var(--blue-soft);
+  color: var(--blue-dark);
+  border-color: var(--blue);
+}

@@ -46,6 +46,27 @@ export interface SubtitleEditLike {
   deleted?: boolean;
 }
 
+/** `@contentos/core` の `IdentifiedShortCandidate` のうち、ここで使う部分。 */
+export interface AnalysisShortCandidateLike {
+  id: string;
+  startSec: number;
+  endSec: number;
+  score: number;
+  signals: string[];
+  primarySpeakerId?: string;
+  transcriptExcerpt?: string;
+}
+
+/** `@contentos/core` の `ShortDecision`。 */
+export interface ShortDecisionLike {
+  adopted?: boolean;
+  title?: string;
+  hook?: string;
+  caption?: string;
+  hashtags?: string[];
+  note?: string;
+}
+
 export interface EditHistoryEntryLike {
   at: string;
   actor: string;
@@ -58,6 +79,8 @@ export interface EditHistoryEntryLike {
 
 export interface EditsLike {
   subtitles: Record<string, SubtitleEditLike>;
+  /** ショート候補の採否・編集。★Step 6 で使う。 */
+  shorts: Record<string, ShortDecisionLike>;
   history: EditHistoryEntryLike[];
   [key: string]: unknown;
 }
@@ -70,7 +93,11 @@ export interface ProjectLike {
   recordedAt?: string;
   assets: { id: string; role: string; fileName: string; absolutePath: string; hasAudio: boolean; durationSec: number }[];
   speakers: { id: string; name: string; title?: string }[];
-  analysis?: { subtitles: AnalysisSubtitleLike[] };
+  analysis?: {
+    subtitles: AnalysisSubtitleLike[];
+    /** ★Step 6（ショート候補Review）で使う。解析前・旧形式では欠けうる。 */
+    shortCandidates?: AnalysisShortCandidateLike[];
+  };
   edits: EditsLike;
   [key: string]: unknown;
 }
@@ -85,8 +112,22 @@ export interface ResolvedSubtitleLike {
   edited: boolean;
 }
 
+export interface ResolvedShortLike extends AnalysisShortCandidateLike {
+  adopted?: boolean;
+  title?: string;
+  hook?: string;
+  caption?: string;
+  hashtags?: string[];
+  note?: string;
+  edited: boolean;
+}
+
 export interface ResolveResultLike {
-  resolved: { subtitles: ResolvedSubtitleLike[] };
+  resolved: {
+    subtitles: ResolvedSubtitleLike[];
+    /** ★Step 6 で使う。resolveProject は常に返す。 */
+    shorts?: ResolvedShortLike[];
+  };
   orphaned: {
     kind: string;
     originalId: string;
@@ -104,14 +145,18 @@ export interface ReviewDeps {
   saveProject(projectDir: string, project: ProjectLike): string;
   /** `@contentos/core` の resolveProject。 */
   resolveProject(
-    analysis: { subtitles: AnalysisSubtitleLike[] },
+    analysis: {
+      subtitles: AnalysisSubtitleLike[];
+      shortCandidates?: AnalysisShortCandidateLike[];
+    },
     edits: EditsLike,
   ): ResolveResultLike;
   /** `@contentos/core` の recordEdit。履歴を必ず残すためこれを使う。 */
   recordEdit(
     edits: EditsLike,
     entry: {
-      kind: 'subtitle';
+      /** ★`EditHistoryEntry.kind`（packages/core）の一部。増やすときは本体と揃える。 */
+      kind: 'subtitle' | 'short';
       targetId: string;
       field: string;
       before: unknown;
@@ -323,15 +368,21 @@ function countsOf(
  * 開いたときに確認画面ごと開けなくなるのを避けるため、ここで空配列を補う。
  * ★補うのは resolveProject へ渡す一時的な値だけで、保存内容には影響しない。
  */
-function normalizeAnalysis(analysis: {
+export function normalizeAnalysis(analysis: {
   subtitles: AnalysisSubtitleLike[];
   [key: string]: unknown;
-}): { subtitles: AnalysisSubtitleLike[] } {
+}): {
+  subtitles: AnalysisSubtitleLike[];
+  shortCandidates: AnalysisShortCandidateLike[];
+} {
   const filled: Record<string, unknown> = { ...analysis };
   for (const key of ['cameraShots', 'chapters', 'markers', 'shortCandidates']) {
     if (!Array.isArray(filled[key])) filled[key] = [];
   }
-  return filled as { subtitles: AnalysisSubtitleLike[] };
+  return filled as {
+    subtitles: AnalysisSubtitleLike[];
+    shortCandidates: AnalysisShortCandidateLike[];
+  };
 }
 
 /** 確認画面に必要な情報だけを組み立てる。★Project全体は返さない。 */

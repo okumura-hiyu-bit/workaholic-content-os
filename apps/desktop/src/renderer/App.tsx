@@ -16,6 +16,7 @@ import { STEP_LABELS } from '../shared/steps.ts';
 import { formatDateTime, formatElapsed, percent, shortenPath } from './format.ts';
 import { ReviewScreen } from './ReviewScreen.tsx';
 import { SetupScreen } from './SetupScreen.tsx';
+import { ShortsScreen } from './ShortsScreen.tsx';
 import {
   canCancel,
   canStart,
@@ -41,7 +42,9 @@ export function App(): JSX.Element {
   const [state, dispatch] = useReducer(reducer, initialState);
   const [now, setNow] = useState(() => Date.now());
   // 画面の切り替え。入口は一覧（setup）。
-  const [screen, setScreen] = useState<'setup' | 'pipeline' | 'review'>('setup');
+  const [screen, setScreen] = useState<'setup' | 'pipeline' | 'review' | 'shorts'>(
+    'setup',
+  );
 
   // ★購読は1回だけ。解除関数をクリーンアップで必ず呼ぶ。
   useEffect(() => {
@@ -121,6 +124,11 @@ export function App(): JSX.Element {
               dispatch({ type: 'selection/succeeded', summary });
               setScreen('pipeline');
             }}
+          />
+        ) : screen === 'shorts' && state.summary !== undefined ? (
+          <ShortsScreen
+            summary={state.summary}
+            onBack={() => setScreen('pipeline')}
           />
         ) : screen === 'review' && state.summary !== undefined ? (
           <ReviewScreen
@@ -215,6 +223,15 @@ export function App(): JSX.Element {
                   onClick={() => setScreen('review')}
                 >
                   字幕を確認・修正
+                </button>
+              )}
+              {state.phase !== 'running' && (
+                <button
+                  type="button"
+                  className="btn btn--secondary"
+                  onClick={() => setScreen('shorts')}
+                >
+                  ショート候補を確認
                 </button>
               )}
               {state.phase === 'running' && (

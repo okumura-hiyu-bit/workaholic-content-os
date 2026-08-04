@@ -40,6 +40,20 @@ import {
   validateUpdateAssetRequest,
 } from '../shared/setup-validate.ts';
 import { validateExpectedUpdatedAt } from '../shared/review-validate.ts';
+import type {
+  SaveShortDecisionResult,
+  ShortsExportResult,
+  ShortsLoadResult,
+} from '../shared/shorts-dto.ts';
+import {
+  validateRemoveShortRequest,
+  validateUpdateShortRequest,
+} from '../shared/shorts-validate.ts';
+import {
+  applyShortDecision,
+  buildShortsData,
+  removeShortDecision,
+} from './shorts.ts';
 import {
   buildSetupData,
   registerAssets,
@@ -87,6 +101,22 @@ export const REVIEW_EXPORT_STEPS: StepId[] = [
   'save-project',
 ];
 
+/**
+ * ショート候補の再出力で動かす工程。★字幕の再出力より1工程狭い。
+ *
+ * ショートの採否・編集は `shorts.csv`（save-artifacts が書く）にしか出ない。
+ * FCP7 XML はショート候補を含まないため `generate-premiere-xml` を動かす
+ * 理由がなく、動かせば Premiere実機検証の対象である成果物を無用に作り直す
+ * ことになる。そのため意図的に外している。
+ *
+ * `save-artifacts` は `generate-premiere-xml` に依存するが、`onlySteps` は
+ * 依存を自動追加せず「完了済みであること」だけを求める（registry.ts の
+ * computeExecutionPlan / assertDependenciesSatisfied）。したがって一度フル
+ * 解析を通したプロジェクトなら、XMLを作り直さずに shorts.csv だけを
+ * 更新できる。未完了なら DEPENDENCY_NOT_COMPLETED で止まる（正しい挙動）。
+ */
+export const SHORTS_EXPORT_STEPS: StepId[] = ['save-artifacts', 'save-project'];
+
 export interface IpcDeps extends ProjectReaderDeps {
   runManager: RunManager;
   /** 確認画面（Review）用。core の関数と、プレビュー生成を注入する。 */
@@ -126,6 +156,11 @@ export interface IpcHandlers {
   reviewRemoveSubtitleEdit(rawRequest: unknown): Promise<SaveSubtitleEditResult>;
   reviewExport(rawRequest: unknown): Promise<ReviewExportResult>;
   reviewOpenMedia(rawPath: unknown): Promise<OpenMediaResult>;
+
+  shortsLoad(rawPath: unknown): Promise<ShortsLoadResult>;
+  shortsUpdateDecision(rawRequest: unknown): Promise<SaveShortDecisionResult>;
+  shortsRemoveDecision(rawRequest: unknown): Promise<SaveShortDecisionResult>;
+  shortsExport(rawRequest: unknown): Promise<ShortsExportResult>;
 
   listProjects(): Promise<ProjectListResult>;
   createProject(rawRequest: unknown): Promise<CreateProjectResult>;
@@ -298,6 +333,82 @@ export function createIpcHandlers(deps: IpcDeps): IpcHandlers {
       const summary = readProjectSummary(path.value, deps);
       if (!summary.ok) return { ok: false, error: summary.error };
       return deps.openMedia(summary.summary.projectPath);
+    },
+
+    // ─── ショート候補の確認・採否 ─────────────────────────
+
+    async shortsLoad(rawPath) {
+      const path = validateProjectPath(rawPath);
+      if (!path.ok) return { ok: false, error: path.error };
+      // 有効なプロジェクトであることを先に確かめる。
+      const summary = readProjectSummary(path.value, deps);
+      if (!summary.ok) return { ok: false, error: summary.error };
+      return buildShortsData(summary.summary.projectPath, deps.review);
+    },
+
+    async shortsUpdateDecision(rawRequest) {
+      const validated = validateUpdateShortRequest(rawRequest);
+      if (!validated.ok) return { ok: false, error: validated.error };
+      const summary = readProjectSummary(validated.value.projectPath, deps);
+      if (!summary.ok) return { ok: false, error: summary.error };
+      // ★保存（analysis は触らない・updatedAt を照合する）
+      return applyShortDecision(
+        { ...validated.value, projectPath: summary.summary.projectPath },
+        deps.review,
+      );
+    },
+
+    async shortsRemoveDecision(rawRequest) {
+      const validated = validateRemoveShortRequest(rawRequest);
+      if (!validated.ok) return { ok: false, error: validated.error };
+      const summary = readProjectSummary(validated.value.projectPath, deps);
+      if (!summary.ok) return { ok: false, error: summary.error };
+      return removeShortDecision(
+        { ...validated.value, projectPath: summary.summary.projectPath },
+        deps.review,
+      );
+    },
+
+    async shortsExport(rawRequest) {
+      const path = validateProjectPath(
+        (rawRequest as { projectPath?: unknown } | null)?.projectPath,
+      );
+      if (!path.ok) return { ok: false, error: path.error };
+
+      const summary = readProjectSummary(path.value, deps);
+      if (!summary.ok) return { ok: false, error: summary.error };
+
+      const root = deps.resolveRoot();
+      if (!root.ok) return { ok: false, error: root.error };
+
+      const pre = deps.preflight(root.projectRoot);
+      if (!pre.ok) {
+        return {
+          ok: false,
+          error:
+            pre.error ??
+            safeError(
+              DESKTOP_ERROR_CODES.ENVIRONMENT_NOT_READY,
+              '再出力に必要な環境が整っていません。',
+            ),
+        };
+      }
+
+      // ★工程はMainが固定する。排他・進捗は解析と同じ仕組みに乗せる。
+      // ★force が要るのは、キャッシュキーが素材と設定から作られ
+      //   project.edits を含まないため。付けないと「変更なし」でスキップされ、
+      //   採否が shorts.csv に出ない。
+      const started = deps.runManager.start({
+        projectPath: summary.summary.projectPath,
+        projectId: summary.summary.projectId,
+        projectRoot: root.projectRoot,
+        options: {
+          onlySteps: SHORTS_EXPORT_STEPS,
+          force: true,
+        },
+      });
+      if (!started.ok) return { ok: false, error: started.error };
+      return { ok: true, runId: started.runId, steps: [...SHORTS_EXPORT_STEPS] };
     },
 
     // ─── プロジェクト一覧・新規作成・素材登録 ─────────────

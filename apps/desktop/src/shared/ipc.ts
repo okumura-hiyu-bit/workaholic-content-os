@@ -20,6 +20,12 @@ export const IPC = {
   reviewExport: 'contentos:review:export',
   reviewOpenMedia: 'contentos:review:open-media',
 
+  /** ショート候補の確認・採否。 */
+  shortsLoad: 'contentos:shorts:load',
+  shortsUpdateDecision: 'contentos:shorts:update',
+  shortsRemoveDecision: 'contentos:shorts:remove',
+  shortsExport: 'contentos:shorts:export',
+
   /** プロジェクト一覧・新規作成・素材登録。 */
   listProjects: 'contentos:setup:list',
   createProject: 'contentos:setup:create',
@@ -50,6 +56,10 @@ export const INVOKE_CHANNELS = [
   IPC.reviewRemoveSubtitleEdit,
   IPC.reviewExport,
   IPC.reviewOpenMedia,
+  IPC.shortsLoad,
+  IPC.shortsUpdateDecision,
+  IPC.shortsRemoveDecision,
+  IPC.shortsExport,
   IPC.listProjects,
   IPC.createProject,
   IPC.chooseParentDir,

@@ -32,6 +32,14 @@ import type {
   UpdateSubtitleEditRequest,
 } from '../shared/review-dto.ts';
 import type {
+  RemoveShortDecisionRequest,
+  SaveShortDecisionResult,
+  ShortsExportRequest,
+  ShortsExportResult,
+  ShortsLoadResult,
+  UpdateShortDecisionRequest,
+} from '../shared/shorts-dto.ts';
+import type {
   CreateProjectRequest,
   CreateProjectResult,
   DroppedFile,
@@ -73,6 +81,10 @@ export const ALLOWED_API_KEYS = [
   'reviewRemoveSubtitleEdit',
   'reviewExport',
   'reviewOpenMedia',
+  'shortsLoad',
+  'shortsUpdateDecision',
+  'shortsRemoveDecision',
+  'shortsExport',
   'listProjects',
   'createProject',
   'chooseParentDir',
@@ -156,6 +168,30 @@ export function createDesktopApi(ipc: IpcBridge): ContentOsDesktopApi {
 
     async reviewOpenMedia(projectPath: string) {
       return (await ipc.invoke(IPC.reviewOpenMedia, projectPath)) as OpenMediaResult;
+    },
+
+    // ─── ショート候補の確認・採否 ─────────────────────────
+
+    async shortsLoad(projectPath: string) {
+      return (await ipc.invoke(IPC.shortsLoad, projectPath)) as ShortsLoadResult;
+    },
+
+    async shortsUpdateDecision(request: UpdateShortDecisionRequest) {
+      return (await ipc.invoke(
+        IPC.shortsUpdateDecision,
+        request,
+      )) as SaveShortDecisionResult;
+    },
+
+    async shortsRemoveDecision(request: RemoveShortDecisionRequest) {
+      return (await ipc.invoke(
+        IPC.shortsRemoveDecision,
+        request,
+      )) as SaveShortDecisionResult;
+    },
+
+    async shortsExport(request: ShortsExportRequest) {
+      return (await ipc.invoke(IPC.shortsExport, request)) as ShortsExportResult;
     },
 
     // ─── プロジェクト一覧・新規作成・素材登録 ─────────────

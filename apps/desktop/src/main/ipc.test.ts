@@ -7,7 +7,12 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { safeError } from '../shared/errors.ts';
-import { createIpcHandlers, REVIEW_EXPORT_STEPS, type IpcDeps } from './ipc.ts';
+import {
+  createIpcHandlers,
+  REVIEW_EXPORT_STEPS,
+  SHORTS_EXPORT_STEPS,
+  type IpcDeps,
+} from './ipc.ts';
 import { RunManager } from './run-manager.ts';
 import type { AnalysisProcess } from './analysis-process.ts';
 import { createFakeStore, createFakeWorld, projectFixture } from './testing/fake-core.ts';
@@ -498,6 +503,218 @@ describe('review:open-media', () => {
 
     expect(result.ok).toBe(true);
     expect(openMedia).toHaveBeenCalledWith('/tmp/ep012');
+  });
+});
+
+describe('shorts:load / update / remove', () => {
+  it('ショート候補を読み込める', async () => {
+    const { handlers } = createDeps();
+    const result = await handlers.shortsLoad('/tmp/ep012');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.candidates.length).toBeGreaterThan(0);
+      expect(result.data.reanalysisWarning).toContain('再解析');
+    }
+  });
+
+  it('★不正なパスを拒否する', async () => {
+    const { handlers } = createDeps();
+    expect((await handlers.shortsLoad('relative/path')).ok).toBe(false);
+    expect((await handlers.shortsLoad('../../etc/passwd')).ok).toBe(false);
+  });
+
+  it('採否を保存できる', async () => {
+    const { handlers } = createDeps();
+    const loaded = await handlers.shortsLoad('/tmp/ep012');
+    if (!loaded.ok) throw new Error('load failed');
+
+    const result = await handlers.shortsUpdateDecision({
+      projectPath: '/tmp/ep012',
+      shortId: 'short_01',
+      expectedUpdatedAt: loaded.data.updatedAt,
+      patch: { adopted: true, title: '神回の入り' },
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.candidate.adopted).toBe(true);
+      expect(result.candidate.title).toBe('神回の入り');
+    }
+  });
+
+  it('★不正な入力を検証層で弾く（保存経路まで届かせない）', async () => {
+    const { handlers } = createDeps();
+    const loaded = await handlers.shortsLoad('/tmp/ep012');
+    if (!loaded.ok) throw new Error('load failed');
+    const base = {
+      projectPath: '/tmp/ep012',
+      expectedUpdatedAt: loaded.data.updatedAt,
+    };
+
+    const bad = [
+      { ...base, shortId: 'short_x', patch: { adopted: true } }, // ID形式
+      { ...base, shortId: 'short_01', patch: {} }, // 中身なし
+      { ...base, shortId: 'short_01', patch: { adopted: 'yes' } }, // 型違い
+      { ...base, shortId: 'short_01', patch: { adopted: true, startSec: 5 } }, // 未対応
+      { ...base, shortId: 'short_01', patch: { title: 'a\nb' } }, // 改行
+      { ...base, projectPath: 'relative', shortId: 'short_01', patch: { adopted: true } },
+      {
+        ...base,
+        expectedUpdatedAt: '2026/08/04',
+        shortId: 'short_01',
+        patch: { adopted: true },
+      },
+      { ...base, shortId: 'short_99', patch: { adopted: true } }, // 解析に無いID
+    ];
+
+    for (const request of bad) {
+      const result = await handlers.shortsUpdateDecision(request);
+      expect(result.ok).toBe(false);
+    }
+  });
+
+  it('★古い updatedAt は競合として拒否する', async () => {
+    const { handlers } = createDeps();
+    const loaded = await handlers.shortsLoad('/tmp/ep012');
+    if (!loaded.ok) throw new Error('load failed');
+
+    await handlers.shortsUpdateDecision({
+      projectPath: '/tmp/ep012',
+      shortId: 'short_01',
+      expectedUpdatedAt: loaded.data.updatedAt,
+      patch: { adopted: true },
+    });
+
+    const stale = await handlers.shortsUpdateDecision({
+      projectPath: '/tmp/ep012',
+      shortId: 'short_02',
+      expectedUpdatedAt: loaded.data.updatedAt,
+      patch: { adopted: true },
+    });
+
+    expect(stale.ok).toBe(false);
+    expect(stale.ok === false && stale.error.code).toBe('PROJECT_CHANGED');
+  });
+
+  it('判断を取り消せる', async () => {
+    const { handlers } = createDeps();
+    const loaded = await handlers.shortsLoad('/tmp/ep012');
+    if (!loaded.ok) throw new Error('load failed');
+
+    const saved = await handlers.shortsUpdateDecision({
+      projectPath: '/tmp/ep012',
+      shortId: 'short_01',
+      expectedUpdatedAt: loaded.data.updatedAt,
+      patch: { adopted: true },
+    });
+    if (!saved.ok) throw new Error('save failed');
+
+    const removed = await handlers.shortsRemoveDecision({
+      projectPath: '/tmp/ep012',
+      shortId: 'short_01',
+      expectedUpdatedAt: saved.updatedAt,
+    });
+
+    expect(removed.ok).toBe(true);
+    if (removed.ok) expect(removed.candidate.adopted).toBeUndefined();
+  });
+
+  it('★取り消しでも不正な入力を弾く', async () => {
+    const { handlers } = createDeps();
+    expect(
+      (
+        await handlers.shortsRemoveDecision({
+          projectPath: 'relative',
+          shortId: 'short_01',
+          expectedUpdatedAt: '2026-08-01T00:00:00.000Z',
+        })
+      ).ok,
+    ).toBe(false);
+  });
+});
+
+describe('shorts:export', () => {
+  it('★save-artifacts と save-project だけを実行する', async () => {
+    const { handlers, runManager } = createDeps();
+    const start = vi.spyOn(runManager, 'start');
+    const result = await handlers.shortsExport({ projectPath: '/tmp/ep012' });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.steps).toEqual(['save-artifacts', 'save-project']);
+    expect(start.mock.calls[0]?.[0].options.onlySteps).toEqual(SHORTS_EXPORT_STEPS);
+  });
+
+  it('★FCP7 XML（generate-premiere-xml）を作り直さない', async () => {
+    const { handlers, runManager } = createDeps();
+    const start = vi.spyOn(runManager, 'start');
+    await handlers.shortsExport({ projectPath: '/tmp/ep012' });
+
+    const steps = start.mock.calls[0]?.[0].options.onlySteps ?? [];
+    expect(steps).not.toContain('generate-premiere-xml');
+  });
+
+  it('★字幕の再出力より狭い（Premiere関連を含まない）', () => {
+    expect(REVIEW_EXPORT_STEPS).toContain('generate-premiere-xml');
+    expect(SHORTS_EXPORT_STEPS).not.toContain('generate-premiere-xml');
+    for (const step of SHORTS_EXPORT_STEPS) {
+      expect(REVIEW_EXPORT_STEPS).toContain(step);
+    }
+  });
+
+  it('★解析・文字起こし・同期を再実行しない', async () => {
+    const { handlers, runManager } = createDeps();
+    const start = vi.spyOn(runManager, 'start');
+    await handlers.shortsExport({ projectPath: '/tmp/ep012' });
+
+    const steps = start.mock.calls[0]?.[0].options.onlySteps ?? [];
+    for (const heavy of [
+      'transcribe',
+      'sync-media',
+      'extract-audio',
+      'detect-speakers',
+      'correct-audio',
+      'probe-media',
+      'extract-short-candidates',
+    ]) {
+      expect(steps).not.toContain(heavy);
+    }
+  });
+
+  it('★force を付ける（editsはキャッシュキーに入らないため）', async () => {
+    const { handlers, runManager } = createDeps();
+    const start = vi.spyOn(runManager, 'start');
+    await handlers.shortsExport({ projectPath: '/tmp/ep012' });
+    expect(start.mock.calls[0]?.[0].options.force).toBe(true);
+  });
+
+  it('★実行中は再出力を拒否する', async () => {
+    const { handlers } = createDeps();
+    const first = await handlers.shortsExport({ projectPath: '/tmp/ep012' });
+    const second = await handlers.shortsExport({ projectPath: '/tmp/ep012' });
+
+    expect(first.ok).toBe(true);
+    expect(second.ok).toBe(false);
+    expect(second.ok === false && second.error.code).toBe('PROJECT_ALREADY_RUNNING');
+  });
+
+  it('★環境が整っていなければ実行しない', async () => {
+    const { handlers, spawn } = createDeps({
+      preflight: () => ({
+        ok: false,
+        error: safeError('ENVIRONMENT_NOT_READY', 'ビルドされていません。'),
+      }),
+    });
+    const result = await handlers.shortsExport({ projectPath: '/tmp/ep012' });
+    expect(result.ok).toBe(false);
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('★不正なパスを拒否する', async () => {
+    const { handlers, spawn } = createDeps();
+    const result = await handlers.shortsExport({ projectPath: 'relative' });
+    expect(result.ok).toBe(false);
+    expect(spawn).not.toHaveBeenCalled();
   });
 });
 
