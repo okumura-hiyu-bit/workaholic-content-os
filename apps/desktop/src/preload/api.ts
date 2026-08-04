@@ -31,11 +31,27 @@ import type {
   SaveSubtitleEditResult,
   UpdateSubtitleEditRequest,
 } from '../shared/review-dto.ts';
+import type {
+  CreateProjectRequest,
+  CreateProjectResult,
+  DroppedFile,
+  ProjectListResult,
+  RemoveAssetRequest,
+  SetupLoadResult,
+  SetupSaveResult,
+  UpdateAssetRequest,
+} from '../shared/setup-dto.ts';
 import { IPC } from '../shared/ipc.ts';
 
 /** ipcRenderer のうち、この層が使う部分だけ。 */
 export interface IpcBridge {
   invoke(channel: string, ...args: unknown[]): Promise<unknown>;
+  /**
+   * ドラッグ＆ドロップされたファイルの絶対パスを解決する。
+   * ★Electron 32以降 File.path は使えないため webUtils.getPathForFile を使う。
+   * この関数は Preload の中だけで呼び、結果（パス）は Renderer へ返さない。
+   */
+  resolveDroppedPath(file: DroppedFile): string | undefined;
   on(channel: string, listener: (event: unknown, ...args: unknown[]) => void): void;
   removeListener(
     channel: string,
@@ -57,6 +73,15 @@ export const ALLOWED_API_KEYS = [
   'reviewRemoveSubtitleEdit',
   'reviewExport',
   'reviewOpenMedia',
+  'listProjects',
+  'createProject',
+  'chooseParentDir',
+  'forgetProject',
+  'loadSetup',
+  'chooseAssetFiles',
+  'registerDroppedAssets',
+  'updateAsset',
+  'removeAsset',
 ] as const;
 
 function subscribe<T>(
@@ -131,6 +156,63 @@ export function createDesktopApi(ipc: IpcBridge): ContentOsDesktopApi {
 
     async reviewOpenMedia(projectPath: string) {
       return (await ipc.invoke(IPC.reviewOpenMedia, projectPath)) as OpenMediaResult;
+    },
+
+    // ─── プロジェクト一覧・新規作成・素材登録 ─────────────
+
+    async listProjects() {
+      return (await ipc.invoke(IPC.listProjects)) as ProjectListResult;
+    },
+
+    async createProject(request: CreateProjectRequest) {
+      return (await ipc.invoke(IPC.createProject, request)) as CreateProjectResult;
+    },
+
+    async chooseParentDir() {
+      return (await ipc.invoke(IPC.chooseParentDir)) as string | undefined;
+    },
+
+    async forgetProject(projectPath: string) {
+      return (await ipc.invoke(IPC.forgetProject, projectPath)) as ProjectListResult;
+    },
+
+    async loadSetup(projectPath: string) {
+      return (await ipc.invoke(IPC.loadSetup, projectPath)) as SetupLoadResult;
+    },
+
+    async chooseAssetFiles(projectPath: string, expectedUpdatedAt: string) {
+      return (await ipc.invoke(
+        IPC.chooseAssetFiles,
+        projectPath,
+        expectedUpdatedAt,
+      )) as SetupSaveResult;
+    },
+
+    async registerDroppedAssets(
+      projectPath: string,
+      expectedUpdatedAt: string,
+      files: readonly DroppedFile[],
+    ) {
+      // ★パスの解決はこの層で完結させ、Rendererへは絶対パスを渡さない。
+      const paths: string[] = [];
+      for (const file of files) {
+        const path = ipc.resolveDroppedPath(file);
+        if (typeof path === 'string' && path.length > 0) paths.push(path);
+      }
+      return (await ipc.invoke(
+        IPC.registerDroppedAssets,
+        projectPath,
+        expectedUpdatedAt,
+        paths,
+      )) as SetupSaveResult;
+    },
+
+    async updateAsset(request: UpdateAssetRequest) {
+      return (await ipc.invoke(IPC.updateAsset, request)) as SetupSaveResult;
+    },
+
+    async removeAsset(request: RemoveAssetRequest) {
+      return (await ipc.invoke(IPC.removeAsset, request)) as SetupSaveResult;
     },
   };
 }

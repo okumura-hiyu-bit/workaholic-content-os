@@ -36,6 +36,8 @@ export const ASSET_ROLES = [
   'opening',
   'ending',
   'thumbnail',
+  // ロゴ・ウォーターマーク等の重ね素材。thumbnail とは用途が別なので分ける。
+  'logo',
   'other',
 ] as const;
 

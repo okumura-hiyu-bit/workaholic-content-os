@@ -162,3 +162,186 @@ export function createFakeStore(
     },
   };
 }
+
+// ─── プロジェクト一覧・新規作成・素材登録のテスト補助 ──────
+
+import { createProject as realCreateProject } from '@contentos/core/project';
+
+import type { AssetDeps, MediaProbe } from '../assets.ts';
+import type { CreateProjectDeps } from '../project-create.ts';
+import { rememberProject } from '../project-registry.ts';
+import type { RegistryDeps } from '../project-registry.ts';
+
+export interface FakeFileEntry {
+  sizeBytes: number;
+  mtimeMs: number;
+  probe?: MediaProbe;
+  /** 読み取れないファイルを再現する。 */
+  unreadable?: boolean;
+}
+
+export interface FakeWorld {
+  registry: RegistryDeps;
+  creator: CreateProjectDeps;
+  assets: AssetDeps;
+  /** 現在ディスクにある想定のプロジェクト。 */
+  readProject(dir: string): ProjectLike;
+  /** project.json が存在するか。 */
+  hasProject(dir: string): boolean;
+  /** 設定ファイル（一覧）の中身。 */
+  registryContents(): string | undefined;
+  /** 素材ファイルを置く。 */
+  putFile(path: string, entry: FakeFileEntry): void;
+  /** 素材ファイルを消す（移動・削除の再現）。 */
+  removeFile(path: string): void;
+  /** 素材ファイルの現在の内容（変更されていないことの確認に使う）。 */
+  fileSnapshot(): Record<string, FakeFileEntry>;
+  /** ディレクトリを作る。 */
+  mkdir(path: string): void;
+  saveCount(): number;
+  failNextSave(message?: string): void;
+  /** 書き込み不可のディレクトリを設定する。 */
+  setReadOnly(dir: string): void;
+  /** 空き容量を設定する。 */
+  setFreeBytes(bytes: number | undefined): void;
+}
+
+const DEFAULT_PROBE: MediaProbe = {
+  durationSec: 40,
+  hasVideo: true,
+  hasAudio: true,
+  width: 1920,
+  height: 1080,
+  fps: 30,
+  audioChannels: 2,
+  audioSampleRate: 48000,
+};
+
+export function audioProbe(overrides: Partial<MediaProbe> = {}): MediaProbe {
+  return {
+    durationSec: 40,
+    hasVideo: false,
+    hasAudio: true,
+    audioChannels: 1,
+    audioSampleRate: 48000,
+    ...overrides,
+  };
+}
+
+export function videoProbe(overrides: Partial<MediaProbe> = {}): MediaProbe {
+  return { ...DEFAULT_PROBE, ...overrides };
+}
+
+/**
+ * メモリ上のファイルシステム＋プロジェクトストア。
+ * ★ffprobe は差し替えて実行しない。元素材は「読むだけ」であることも検証できる。
+ */
+export function createFakeWorld(
+  options: { now?: () => Date } = {},
+): FakeWorld {
+  const dirs = new Set<string>(['/work']);
+  const files = new Map<string, FakeFileEntry>();
+  const projects = new Map<string, string>();
+  const readOnly = new Set<string>();
+  let registryRaw: string | undefined;
+  let saves = 0;
+  let failNext: string | undefined;
+  let freeBytes: number | undefined = 500 * 1024 ** 3;
+
+  let tick = 0;
+  const now = options.now ?? (() => new Date(Date.UTC(2026, 7, 5, 0, 0, ++tick)));
+
+  const readProject = (dir: string): ProjectLike => {
+    const raw = projects.get(dir);
+    if (raw === undefined) throw new Error(`project not found: ${dir}`);
+    return JSON.parse(raw) as ProjectLike;
+  };
+
+  const writeProject = (dir: string, project: ProjectLike): string => {
+    if (failNext !== undefined) {
+      const message = failNext;
+      failNext = undefined;
+      // 本物の saveProject は一時ファイル→rename なので既存は壊れない。
+      throw new Error(message);
+    }
+    saves += 1;
+    const persisted = { ...project, updatedAt: now().toISOString() };
+    projects.set(dir, JSON.stringify(persisted));
+    return `${dir}/project.json`;
+  };
+
+  const exists = (path: string): boolean =>
+    dirs.has(path) ||
+    files.has(path) ||
+    projects.has(path) ||
+    (path.endsWith('/project.json') && projects.has(path.slice(0, -'/project.json'.length)));
+
+  const registry: RegistryDeps = {
+    read: () => registryRaw,
+    write: (contents) => {
+      registryRaw = contents;
+    },
+    loadProject: (dir) => ({ project: readProject(dir) }),
+    fileExists: exists,
+    now,
+  };
+
+  const creator: CreateProjectDeps = {
+    createProject: (input) => realCreateProject(input) as unknown as ProjectLike,
+    saveProject: writeProject,
+    fileExists: exists,
+    ensureDir: (path) => dirs.add(path),
+    canWrite: (dir) => !readOnly.has(dir),
+    // ★本物の rememberProject を使う（登録ロジックの写しを持たない）。
+    remember: (dir) => {
+      rememberProject(dir, registry);
+    },
+    now,
+  };
+
+  const assets: AssetDeps = {
+    loadProject: (dir) => ({ project: readProject(dir) }),
+    saveProject: writeProject,
+    fileExists: exists,
+    canRead: (path) => files.has(path) && files.get(path)?.unreadable !== true,
+    canWrite: (dir) => !readOnly.has(dir),
+    statFile: (path) => {
+      const entry = files.get(path);
+      return entry ? { sizeBytes: entry.sizeBytes, mtimeMs: entry.mtimeMs } : undefined;
+    },
+    probe: (path) => {
+      const entry = files.get(path);
+      if (entry?.probe === undefined) {
+        throw new Error(`not a media file: ${path}`);
+      }
+      return entry.probe;
+    },
+    freeBytes: () => freeBytes,
+  };
+
+  return {
+    registry,
+    creator,
+    assets,
+    readProject,
+    hasProject: (dir) => projects.has(dir),
+    registryContents: () => registryRaw,
+    putFile: (path, entry) => {
+      files.set(path, entry);
+      dirs.add(path.slice(0, path.lastIndexOf('/')));
+    },
+    removeFile: (path) => {
+      files.delete(path);
+    },
+    fileSnapshot: () => Object.fromEntries([...files.entries()].map(([k, v]) => [k, { ...v }])),
+    mkdir: (path) => dirs.add(path),
+    saveCount: () => saves,
+    failNextSave: (message = 'ENOSPC: no space left on device') => {
+      failNext = message;
+    },
+    setReadOnly: (dir) => readOnly.add(dir),
+    setFreeBytes: (bytes) => {
+      freeBytes = bytes;
+    },
+  };
+}

@@ -10,7 +10,7 @@ import { safeError } from '../shared/errors.ts';
 import { createIpcHandlers, REVIEW_EXPORT_STEPS, type IpcDeps } from './ipc.ts';
 import { RunManager } from './run-manager.ts';
 import type { AnalysisProcess } from './analysis-process.ts';
-import { createFakeStore, projectFixture } from './testing/fake-core.ts';
+import { createFakeStore, createFakeWorld, projectFixture } from './testing/fake-core.ts';
 
 const PROJECT_ROOT = '/Users/someone/workaholic-content-os';
 
@@ -50,10 +50,16 @@ function createDeps(overrides: Partial<IpcDeps> = {}) {
   });
 
   const store = createFakeStore({ '/tmp/ep012': projectFixture() });
+  const world = createFakeWorld();
 
   const deps: IpcDeps = {
     runManager,
     review: store.deps,
+    registry: world.registry,
+    creator: world.creator,
+    assets: world.assets,
+    showDirectoryDialog: async () => '/work',
+    showAssetDialog: async () => [],
     openMedia: async () => ({
       ok: false,
       error: safeError('ENVIRONMENT_NOT_READY', 'プレビューは未生成です。'),

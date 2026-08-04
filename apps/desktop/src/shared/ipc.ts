@@ -20,6 +20,17 @@ export const IPC = {
   reviewExport: 'contentos:review:export',
   reviewOpenMedia: 'contentos:review:open-media',
 
+  /** プロジェクト一覧・新規作成・素材登録。 */
+  listProjects: 'contentos:setup:list',
+  createProject: 'contentos:setup:create',
+  chooseParentDir: 'contentos:setup:choose-dir',
+  forgetProject: 'contentos:setup:forget',
+  loadSetup: 'contentos:setup:load',
+  chooseAssetFiles: 'contentos:setup:choose-assets',
+  registerDroppedAssets: 'contentos:setup:register-dropped',
+  updateAsset: 'contentos:setup:update-asset',
+  removeAsset: 'contentos:setup:remove-asset',
+
   /** send（Main → Renderer、一方向） */
   pipelineProgress: 'contentos:pipeline:progress',
   pipelineFinished: 'contentos:pipeline:finished',
@@ -39,6 +50,15 @@ export const INVOKE_CHANNELS = [
   IPC.reviewRemoveSubtitleEdit,
   IPC.reviewExport,
   IPC.reviewOpenMedia,
+  IPC.listProjects,
+  IPC.createProject,
+  IPC.chooseParentDir,
+  IPC.forgetProject,
+  IPC.loadSetup,
+  IPC.chooseAssetFiles,
+  IPC.registerDroppedAssets,
+  IPC.updateAsset,
+  IPC.removeAsset,
 ] as const;
 
 /** Main → Renderer の一方向チャンネル。 */

@@ -15,6 +15,7 @@ import { useCallback, useEffect, useReducer, useState, type JSX } from 'react';
 import { STEP_LABELS } from '../shared/steps.ts';
 import { formatDateTime, formatElapsed, percent, shortenPath } from './format.ts';
 import { ReviewScreen } from './ReviewScreen.tsx';
+import { SetupScreen } from './SetupScreen.tsx';
 import {
   canCancel,
   canStart,
@@ -39,8 +40,8 @@ function ErrorBanner({ state }: { state: AppState }): JSX.Element | null {
 export function App(): JSX.Element {
   const [state, dispatch] = useReducer(reducer, initialState);
   const [now, setNow] = useState(() => Date.now());
-  // 今回追加した確認画面。解析画面と切り替える。
-  const [screen, setScreen] = useState<'pipeline' | 'review'>('pipeline');
+  // 画面の切り替え。入口は一覧（setup）。
+  const [screen, setScreen] = useState<'setup' | 'pipeline' | 'review'>('setup');
 
   // ★購読は1回だけ。解除関数をクリーンアップで必ず呼ぶ。
   useEffect(() => {
@@ -114,7 +115,14 @@ export function App(): JSX.Element {
       </header>
 
       <main className="app__main">
-        {screen === 'review' && state.summary !== undefined ? (
+        {screen === 'setup' ? (
+          <SetupScreen
+            onOpenProject={(summary) => {
+              dispatch({ type: 'selection/succeeded', summary });
+              setScreen('pipeline');
+            }}
+          />
+        ) : screen === 'review' && state.summary !== undefined ? (
           <ReviewScreen
             summary={state.summary}
             onBack={() => setScreen('pipeline')}
@@ -130,9 +138,18 @@ export function App(): JSX.Element {
               解析したい収録の <code>project.json</code> を選んでください。
               素材・話者・同期設定はこのファイルに記録されています。
             </p>
-            <button type="button" className="btn btn--primary" onClick={handleSelect}>
-              プロジェクトを選択
-            </button>
+            <div className="card__actions card__actions--center">
+              <button
+                type="button"
+                className="btn btn--primary"
+                onClick={() => setScreen('setup')}
+              >
+                プロジェクト一覧へ
+              </button>
+              <button type="button" className="btn btn--secondary" onClick={handleSelect}>
+                project.json を直接選ぶ
+              </button>
+            </div>
           </section>
         )}
 
@@ -140,8 +157,12 @@ export function App(): JSX.Element {
           <section className="card">
             <div className="card__head">
               <h2 className="card__title">{state.summary.name}</h2>
-              <button type="button" className="btn btn--ghost" onClick={handleSelect}>
-                別のプロジェクトを選ぶ
+              <button
+                type="button"
+                className="btn btn--ghost"
+                onClick={() => setScreen('setup')}
+              >
+                プロジェクト一覧へ
               </button>
             </div>
 

@@ -33,6 +33,8 @@ export const DESKTOP_ERROR_CODES = {
   SUBTITLE_NOT_EDITABLE: 'SUBTITLE_NOT_EDITABLE',
   /** 解析がまだ行われていない（字幕が存在しない）。 */
   ANALYSIS_NOT_READY: 'ANALYSIS_NOT_READY',
+  /** 指定された素材が見つからない。 */
+  ASSET_NOT_FOUND: 'ASSET_NOT_FOUND',
   UNKNOWN: 'UNKNOWN',
 } as const;
 

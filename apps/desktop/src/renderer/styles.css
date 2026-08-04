@@ -636,3 +636,184 @@ body {
   color: var(--gray-600);
   font-size: 13px;
 }
+
+/* ─── プロジェクト一覧・素材登録 ─── */
+
+.card__actions--center {
+  justify-content: center;
+}
+
+.projects {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+}
+
+.projects__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--gray-100);
+}
+
+.projects__button {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 16px;
+  flex: 1;
+  padding: 10px 8px;
+  background: none;
+  border: none;
+  border-left: 3px solid transparent;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.projects__button:hover:not(:disabled) {
+  background: var(--gray-50);
+  border-left-color: var(--blue);
+}
+
+.projects__button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.projects__name {
+  font-weight: 700;
+}
+
+.projects__meta {
+  grid-column: 1;
+  font-size: 12px;
+  color: var(--gray-600);
+}
+
+.projects__updated {
+  grid-row: 1 / span 2;
+  grid-column: 2;
+  align-self: center;
+  font-size: 12px;
+  color: var(--gray-400);
+  font-variant-numeric: tabular-nums;
+}
+
+.projects__item--missing .projects__name {
+  color: var(--danger);
+}
+
+/* ドロップ領域 */
+
+.dropzone {
+  border: 2px dashed var(--gray-200);
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.dropzone--active {
+  border-color: var(--blue);
+  background: var(--blue-soft);
+}
+
+/* 素材一覧 */
+
+.assets {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.assets__item {
+  border: 1px solid var(--gray-200);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.assets__item--unconfirmed {
+  border-color: #f0d9ac;
+  background: var(--warn-soft);
+}
+
+.assets__head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.assets__name {
+  font-weight: 700;
+  word-break: break-all;
+}
+
+.assets__dir {
+  font-size: 11px;
+  color: var(--gray-400);
+}
+
+.assets__controls {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.assets__field {
+  display: block;
+  min-width: 200px;
+}
+
+.assets__toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  padding-bottom: 8px;
+}
+
+.assets__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--gray-600);
+}
+
+.assets__meta div {
+  display: flex;
+  gap: 5px;
+}
+
+.assets__meta dt {
+  color: var(--gray-400);
+}
+
+.assets__meta dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 出演者入力 */
+
+.speaker-row {
+  display: grid;
+  grid-template-columns: 24px 1fr 120px auto;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.speaker-row__slot {
+  font-weight: 700;
+  color: var(--blue);
+  text-align: center;
+}
+
+.attention__tag--warn {
+  background: var(--warn-soft);
+  color: var(--warn);
+}

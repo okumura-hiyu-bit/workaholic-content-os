@@ -14,6 +14,16 @@
 
 import type { StepId, StepStatus, SyncModeDto } from './steps.ts';
 import type {
+  CreateProjectRequest,
+  CreateProjectResult,
+  DroppedFile,
+  ProjectListResult,
+  RemoveAssetRequest,
+  SetupLoadResult,
+  SetupSaveResult,
+  UpdateAssetRequest,
+} from './setup-dto.ts';
+import type {
   OpenMediaResult,
   RemoveSubtitleEditRequest,
   ReviewExportRequest,
@@ -158,6 +168,31 @@ export interface ContentOsDesktopApi {
   ): Promise<SaveSubtitleEditResult>;
   reviewExport(request: ReviewExportRequest): Promise<ReviewExportResult>;
   reviewOpenMedia(projectPath: string): Promise<OpenMediaResult>;
+
+  /** プロジェクト一覧・新規作成・素材登録。 */
+  listProjects(): Promise<ProjectListResult>;
+  createProject(request: CreateProjectRequest): Promise<CreateProjectResult>;
+  /** 保存場所を選ぶダイアログ。選ばれた絶対パスだけを返す。 */
+  chooseParentDir(): Promise<string | undefined>;
+  /** 一覧から外す（project.json も素材も削除しない）。 */
+  forgetProject(projectPath: string): Promise<ProjectListResult>;
+  loadSetup(projectPath: string): Promise<SetupLoadResult>;
+  /** ファイル選択ダイアログで素材を登録する。 */
+  chooseAssetFiles(
+    projectPath: string,
+    expectedUpdatedAt: string,
+  ): Promise<SetupSaveResult>;
+  /**
+   * ドラッグ＆ドロップされたファイルを登録する。
+   * ★パスの解決は Preload が webUtils で行い、Renderer には返さない。
+   */
+  registerDroppedAssets(
+    projectPath: string,
+    expectedUpdatedAt: string,
+    files: readonly DroppedFile[],
+  ): Promise<SetupSaveResult>;
+  updateAsset(request: UpdateAssetRequest): Promise<SetupSaveResult>;
+  removeAsset(request: RemoveAssetRequest): Promise<SetupSaveResult>;
 
   /** 戻り値は購読解除関数。Reactのアンマウント時に必ず呼ぶこと。 */
   onPipelineProgress(

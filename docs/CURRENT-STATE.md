@@ -1,6 +1,6 @@
 # CURRENT STATE — 引き継ぎドキュメント
 
-> 作成日: 2026-07-30 / 最終更新: 2026-08-03（Step 1「土台整理」、Step 2「Electron骨組み + IPC」、Step 3「確認画面：字幕」、Step 4「字幕ID重複の解消」を反映）。この内容は会話の要約ではなく、**実際のリポジトリ・テスト結果・型チェック結果を根拠に**作成しています。数値は必ず次回セッション側でも再確認してください（本ファイル末尾のコマンド）。
+> 作成日: 2026-07-30 / 最終更新: 2026-08-04（Step 1「土台整理」、Step 2「Electron骨組み + IPC」、Step 3「確認画面：字幕」、Step 4「字幕ID重複の解消」、Step 5「プロジェクト一覧・新規作成・素材登録」を反映）。この内容は会話の要約ではなく、**実際のリポジトリ・テスト結果・型チェック結果を根拠に**作成しています。数値は必ず次回セッション側でも再確認してください（本ファイル末尾のコマンド）。
 
 ---
 
@@ -147,13 +147,53 @@ cwd固定なら `packages/*` を一切変更せずに同じ結果が得られる
 | 層 | 責務 | してはいけないこと |
 |---|---|---|
 | Main | ウィンドウ生成・IPC受付・入力検証・排他・projectRoot解決・構造化ログ | `runPipeline()` を直接実行しない |
-| Preload | `contextBridge` で12個のAPIだけを公開 | `ipcRenderer` / `fs` / `child_process` を渡さない |
+| Preload | `contextBridge` で21個のAPIだけを公開 | `ipcRenderer` / `fs` / `child_process` を渡さない |
 | Renderer | 表示と操作。状態遷移は純粋なリデューサ | Nodeの機能に触れない（tsconfig.web.json が `types: []` で防ぐ） |
 | 解析専用プロセス | `dist/pipeline.js` を動的importして `runPipeline()` を実行 | `packages/*` を相対パスでimportしない |
 
 **Rendererへ渡さないもの**：`technicalMessage`・stack trace・`Error`オブジェクト・`AbortSignal`・関数・APIキー・文字起こし全文・字幕全文。`PipelineError` は `shared/errors.ts` の `toSafeError()` で `SafePipelineError` に落としてから送る。開発者向け情報は `main/logger.ts` の構造化ログにのみ残す。
 
 **二重実行の防止**：`run-pipeline.ts` は変更していない。`main/run-manager.ts` が実行中プロジェクトの `Set` と runId の `Map` を持ち、UIの `disabled` に依存せずMain側で開始要求そのものを拒否する。同じprojectIdなら `PROJECT_ALREADY_RUNNING`、別プロジェクトなら `ALREADY_RUNNING`。中止完了まで再実行不可。解析プロセスが異常終了した場合も `onExit` で必ずロックを解放する。
+
+### プロジェクト一覧・新規作成・素材登録（2026-08-04 追加）
+
+実運用の入口。**新規案件を作る → 素材を登録する → 役割を決める → 解析へ進む** までをGUIで完結させる。
+
+**★プロジェクト一覧は「参照情報だけ」を持つ。**
+プロジェクト本体は中央DBへ移さない。アプリ設定（`app.getPath('userData')/projects.json`）が持つのは
+`projectPath` と `lastOpenedAt` の2つだけで、案件名・ステータス・素材数・更新日時は**毎回 project.json から読み直す**。
+CLIで更新した内容もそのまま一覧に反映され、一覧とプロジェクト本体がズレない。ローカル完結・固定費0円。
+
+| 関心事 | 実装 |
+|---|---|
+| 一覧の保存・読み出し | `apps/desktop/src/main/project-registry.ts` |
+| 新規作成 | `apps/desktop/src/main/project-create.ts` |
+| 素材登録・役割設定・解析前チェック | `apps/desktop/src/main/assets.ts` |
+| DTO・検証 | `apps/desktop/src/shared/setup-dto.ts` / `setup-validate.ts` |
+| 画面 | `apps/desktop/src/renderer/SetupScreen.tsx` + `setup-state.ts` |
+
+**新規作成**：`@contentos/core` の `createProject()` が返した構造をそのまま使い、出演者と `syncMode` だけを載せて保存する。
+`analysis` は作らず（解析前なので存在しない）、`edits` は初期構造のまま。
+案件フォルダは `<保存場所>/<収録日>_<案件名>` で、**既存フォルダがあれば連番を付けて絶対に上書きしない**。
+出演者の記号（A / B / C）が `Speaker.id` になり、素材の役割（`mic_A`・`cam_A`）と対応する。
+
+**★素材は読むだけ。移動・コピー・上書きを一切しない。**
+project.json に絶対パスと ffprobe のメタデータを保存し、元のファイルには触れない（実機でMD5一致を確認済み）。
+
+**★自動推測した役割のまま解析させない。**
+ファイル名から役割を推測するが `roleConfirmed: false` を立て、**未確定の素材が1つでもあれば解析開始をエラーで止める**。
+人が役割を選ぶと確定になる（判断は `assets.ts` の `updateAsset` が持ち、検証層は構造だけを見る）。
+
+**★「解析に使わない」素材は `project.assets` から外す。**
+パイプラインは `project.assets` を全部使うため、外さないと「無効にしたのに解析される」ことになる。
+捨てずに `project.disabledAssets`（`migrateProject` が未知フィールドを保持する性質を利用）へ退避し、いつでも戻せる。
+
+**解析前チェック**：`error`（解析開始不可）と `warning`（人が確認して続行可）を分ける。
+
+| severity | 内容 |
+|---|---|
+| error | 素材なし / 基準映像なし / 音声付き素材なし / 役割未確定 / ファイル欠落 / 読み取り不可 / 重複登録 / 書き込み不可 |
+| warning | 出演者のマイク・カメラ未登録 / fps不一致 / 尺の大幅な差 / 空き容量不足 / 映像も音声も無い素材 / 解析済みプロジェクトの素材変更 |
 
 ### 確認画面（Review）— 字幕（2026-08-03 追加）
 
@@ -265,6 +305,17 @@ sub-00020960-3    3件目
 | 字幕IDの曖昧性解消（連番付与・時刻復元） | `packages/core/src/project.ts` の `assignSubtitleIds` / `timeFromId` | テスト（24件）＋実データ移行確認 |
 | 字幕生成工程（ID採番・ゼロ長キューの警告） | `packages/pipeline/src/steps/generate-subtitles.ts` | テスト（12件）＋実機 |
 
+### プロジェクト一覧・新規作成・素材登録（2026-08-04 追加）
+
+| 機能 | 実装場所 | 確認状況 |
+|---|---|---|
+| プロジェクト一覧（参照情報のみを保存） | `apps/desktop/src/main/project-registry.ts` | テスト＋実機 |
+| 新規プロジェクト作成 | `apps/desktop/src/main/project-create.ts` | テスト＋実機（CLIで開けることまで確認） |
+| 素材登録・役割設定・解析前チェック | `apps/desktop/src/main/assets.ts` | テスト（54件）＋実機（実ffprobeで5素材） |
+| 入力検証（案件名・日付・出演者・素材ID・役割） | `apps/desktop/src/shared/setup-validate.ts` | テスト（42件）＋実機（不正入力5種を拒否） |
+| 画面の状態遷移（一覧/作成/素材登録/保存/競合） | `apps/desktop/src/renderer/setup-state.ts` | テスト（20件） |
+| 一覧・新規作成・素材登録の画面 | `apps/desktop/src/renderer/SetupScreen.tsx` | 実機（一覧の描画とAPI疎通。フォーム操作は人手で未確認） |
+
 ---
 
 ## 4. 重要な設計判断
@@ -291,11 +342,11 @@ $ npm run typecheck
 （エラー0件）
 
 $ npm test
-Test Files  35 passed (35)
-     Tests  802 passed (802)
+Test Files  38 passed (38)
+     Tests  918 passed (918)
 ```
 
-内訳：コア 498件（21ファイル）＋ Electron 304件（14ファイル）。Electronのテストは ffmpeg・faster-whisper を一切起動せず、解析専用プロセスの起動関数を差し替えて検証している。
+内訳：コア 498件（21ファイル）＋ Electron 420件（17ファイル）。Electronのテストは ffmpeg・faster-whisper を一切起動せず、解析専用プロセスの起動関数を差し替えて検証している。
 
 - **実機smoke testの結果**：`cli/src/pipeline.ts`を実プロジェクト（`project.json`＋実際のffmpeg/whisper）に対して複数回実行し、以下を確認済み。
   - フルラン：15/15完了（0失敗・0警告、修正後）
@@ -352,6 +403,22 @@ Test Files  35 passed (35)
   10. CLIでフル解析を実行しても `edits.subtitles` が保持された（＝再解析で人間修正が消えない）
   11. プレビュー音声を生成（AAC / 32kHz / モノラル / 47kbps / 241KB）。元素材は無変更
   12. **メディアプロトコルの防御**：正規トークンのURLは `<audio>` で再生でき（duration 40秒）、偽造トークンは拒否、`file:///etc/passwd` はCSPで遮断
+- **プロジェクト一覧・新規作成・素材登録の実機確認（2026-08-04）**：
+  1. Electron起動時の入口がプロジェクト一覧になっている（画面テキストで確認）
+  2. Preloadの公開APIは21個。`require` / `process` / `ipcRenderer` はすべて `undefined`
+  3. 不正入力5種を拒否（相対パスの保存先 / 案件名のスラッシュ / 存在しない日付 / 出演者0名 / 未知のsyncMode）
+  4. 新規プロジェクト作成 → `2026-08-05_実機確認 第1回` フォルダと project.json を生成
+  5. 一覧に載り、素材数が project.json から読み直される
+  6. **実ffprobeで5素材を登録**（wide / cam_A / cam_B / mic_A / mic_B）。尺40秒・640×360・30fps・1ch/48000Hz を取得
+  7. 役割の自動推測がすべて的中（ただし `roleConfirmed: false` のまま）
+  8. **役割未確定では `canAnalyze: false`**（`ROLE_UNCONFIRMED` × 5）
+  9. 役割を確定すると `canAnalyze: true` に変わり、出演者A/Bのマイク・カメラが紐づく
+  10. 重複登録・映像音声でないファイル（`expected.json`）を拒否
+  11. 競合更新（古い `updatedAt`）を検出して上書きしない
+  12. **DTOに素材の絶対パスが含まれない**
+  13. 解析開始が既存Step 2の経路で通り、**CLIでも同じ project.json を開けて解析できた**
+  14. 字幕Reviewへ接続できる（`reviewLoad` が成功）
+  15. **元素材のMD5が登録前後で完全一致**（移動・コピー・変更なし）
 - **再出力が依存未完了で失敗する場合の確認**：中止された工程（`correct-audio: cancelled`）が残った状態で再出力すると、`DEPENDENCY_NOT_COMPLETED`「依存する工程「correct-audio」がまだ完了していません。」が返り、**誤った成果物を作らずに停止する**ことを確認した。フル解析を1回通せば解消する。
 
 ---
@@ -371,6 +438,10 @@ Test Files  35 passed (35)
 - **【Electron】長時間実行時のUI**：40秒のfixtureで100秒の完走を確認したのみ。10分規模の素材での進捗表示の見え方・メモリは未計測。
 - **【確認画面】画面上の操作**：データ層・IPC層はCDP経由で実アプリを操作して確認済みだが、**ファイル選択ダイアログを経て確認画面を開き、一覧をクリックして本文を打ち替える一連のUI操作は人手で未確認**（ダイアログがOSネイティブのため自動化できない）。状態遷移そのものはリデューサのテスト30件で固定してある。
 - **【確認画面】長い字幕一覧の描画**：8キューでの確認のみ。10分規模（数百キュー）でのスクロール性能・再生同期の追随は未計測。
+- **【一覧・素材登録】ドラッグ＆ドロップの実機確認**：`webUtils.getPathForFile`（Electron 32以降の公式方式）で実装しているが、**実際にファイルをドラッグして落とす操作は人手で未確認**。CDPからは本物の `File` オブジェクトを作れず、Preloadがパスを解決できないため到達できない（設計上正しい挙動）。Main側の登録処理は実ffprobe込みで確認済み。
+- **【一覧・素材登録】ファイル選択ダイアログ経由の登録**：OSネイティブのため自動化できず未確認。ダイアログが返すパスを使う経路自体は、ドロップ経路と同じ `registerAssets` を通る。
+- **【一覧・素材登録】フォーム操作**：新規作成フォームへの入力・素材一覧での役割変更は、状態遷移をリデューサのテスト20件で固定しているが、画面上のクリック操作は人手で未確認。
+- **【一覧】3名以上の出演者**：`SPEAKER_SLOTS` は A/B/C の3枠まで。4名以上には `SPEAKER_SLOTS` と `ASSET_ROLES` の拡張が要る（構造は対応済みだが未検証）。
 - **【確認画面】プレビュー生成の所要時間**：40秒素材で即時。長尺素材での生成時間と、生成中のUIの見え方は未検証（生成は非同期で行うためメインプロセスは止まらない）。
 
 ---
@@ -420,6 +491,20 @@ Electron GUIの前提となる構成の整理を実施済み。**ロジックの
 - 確認画面：一意なIDのキューは編集可能に。旧形式の重複IDは互換性のため引き続き編集拒否
 - 重複IDに修正が付いている異常データを「要確認」として提示（自動で移し替えない）
 - テスト45件を追加。実データのプロジェクトで移行を確認（衝突なし6件のIDは不変、孤立0件のまま）
+
+### 完了済み：Step 5 — プロジェクト一覧・新規作成・素材登録（2026-08-04）
+
+実運用の入口をGUIで成立させた。**`run-pipeline.ts`・キャッシュ方式・FCP7 XML生成は無変更**。
+
+- プロジェクト一覧（参照情報だけをアプリ設定に保存。本体はproject.jsonのまま）
+- 新規作成（`createProject()` をそのまま使用。既存フォルダを上書きしない）
+- 素材登録（実ffprobeでメタデータ取得。**元素材は読むだけ**）
+- 役割の自動推測は提案どまり。未確定のままでは解析させない
+- 解析前チェックを error / warning に分離
+- 既存の解析画面・字幕Reviewへそのまま接続
+- テスト116件を追加
+
+`packages/core` の `ASSET_ROLES` に `logo` を1件追加した（要求された素材種別のうち唯一存在しなかったため）。既存プロジェクトに `logo` の素材は無いので後方互換。
 
 ### 次の実装
 

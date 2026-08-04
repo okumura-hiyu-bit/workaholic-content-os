@@ -18,6 +18,8 @@ function createFakeIpc() {
       invoked.push({ channel, args });
       return { ok: true };
     }),
+    // ドロップされたファイルのパス解決（本物は webUtils.getPathForFile）。
+    resolveDroppedPath: (file) => (file as { path?: string }).path,
     on: (channel, listener) => {
       if (!listeners.has(channel)) listeners.set(channel, new Set());
       listeners.get(channel)!.add(listener);
