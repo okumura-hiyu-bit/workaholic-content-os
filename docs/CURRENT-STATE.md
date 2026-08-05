@@ -1,10 +1,9 @@
 # CURRENT STATE — 引き継ぎドキュメント
 
-> 作成日: 2026-07-30 / 最終更新: 2026-08-04（Step 1「土台整理」、Step 2「Electron骨組み + IPC」、Step 3「確認画面：字幕」、Step 4「字幕ID重複の解消」、Step 5「プロジェクト一覧・新規作成・素材登録」、Step 6「確認画面：ショート候補」を反映）。この内容は会話の要約ではなく、**実際のリポジトリ・テスト結果・型チェック結果を根拠に**作成しています。数値は必ず次回セッション側でも再確認してください（本ファイル末尾のコマンド）。
+> 作成日: 2026-07-30 / 最終更新: 2026-08-05（Step 1「土台整理」、Step 2「Electron骨組み + IPC」、Step 3「確認画面：字幕」、Step 4「字幕ID重複の解消」、Step 5「プロジェクト一覧・新規作成・素材登録」、Step 6「確認画面：ショート候補」、Step 7「確認画面：カメラ切替」を反映）。この内容は会話の要約ではなく、**実際のリポジトリ・テスト結果・型チェック結果を根拠に**作成しています。数値は必ず次回セッション側でも再確認してください（本ファイル末尾のコマンド）。
 >
-> **Step 1〜6はすべてコミット済み**（最新: `7e37d07`）。ワーキングツリーに未コミットの実装は残っていません。
-> リポジトリはブランチ `main`、リモート `origin`（https://github.com/okumura-hiyu-bit/workaholic-content-os）へpush済みです。
-> テストは **41ファイル / 1048件** 全pass、型チェック エラー0件、ビルド成功。
+> リポジトリはブランチ `main`、リモート `origin`（https://github.com/okumura-hiyu-bit/workaholic-content-os）。
+> テストは **45ファイル / 1228件** 全pass、型チェック エラー0件、ビルド成功。
 
 ---
 
@@ -287,6 +286,72 @@ project.json に絶対パスと ffprobe のメタデータを保存し、元の�
 - **区間（開始・終了時刻）の編集は未対応。** `ShortDecision`（`packages/core`）が時刻を持たず、適用するには凍結対象の `resolve.ts` の変更が必要になるため。要求が来たら黙って無視せず**検証で拒否する**。
 - 上記のとおり `hook` / `caption` / `hashtags` / `note` は成果物に出ない。
 
+### 確認画面（Review）— カメラ切替（2026-08-05 追加 / Step 7）
+
+字幕・ショート候補と同じ3レイヤー分離・`expectedUpdatedAt` の競合検出・`saveProject()` の原子的保存・`recordEdit()` の履歴で作る。**`packages/*` は1ファイルも変更していない**（差分はすべて `apps/desktop/` 内）。
+
+| 関心事 | 実装 |
+|---|---|
+| データ組み立て・保存 | `apps/desktop/src/main/camera.ts` |
+| 入力検証 | `apps/desktop/src/shared/camera-validate.ts` |
+| DTO | `apps/desktop/src/shared/camera-dto.ts` |
+| 画面 | `apps/desktop/src/renderer/CameraScreen.tsx` + `camera-state.ts` |
+| 再出力の工程固定 | `apps/desktop/src/main/ipc.ts` の `CAMERA_EXPORT_STEPS` |
+
+**★字幕・ショート候補との決定的な違い（3点）**
+
+**① カメラ修正は FCP7 XML そのものを書き換える。**
+`generate-premiere-xml.ts` が `resolveProject()` の `resolved.cameraShots` をそのまま V1 トラックに並べる。`save-artifacts` は `cameraShots` を件数表示（`report.html`）にしか使わないため、**カメラ修正が反映される成果物は FCP7 XML だけ**。字幕（SRT）やショート（CSV）と違い、Premiereプロジェクトの映像トラック構成が直接変わる。
+
+★ただし**変更したのは入力データだけ**で、生成ロジック（`fcp7xml.ts` / `build-project.ts` / `generate-premiere-xml.ts`）は無変更。`resolveProject` を経由して人間の修正を流し込む既存の仕組みをそのまま使っている。
+
+**② カメラIDは時刻を持つ（`shot-<ミリ秒>`）ので再接続が効く。**
+ショート候補（連番IDのため再解析で必ず孤立）とは正反対で、`matchEdits` が時刻の近さ（既定±0.5秒）で繋ぎ直す。その結果 **`reattached` が日常的に発生する**。`ResolveResult.reattached` は以前から存在したが、**字幕・ショートでは一度も画面に出していなかった**。カメラでは主役級の情報なので今回初めて DTO に載せた。
+
+「IDが時刻を持たないショートの `rangeChanged`」に相当する仕組みは**カメラには入れていない**。位置が動けば `matchEdits` が `reattached` として明示的に報告するため、同じ問題を別の仕組みで解く必要がないから。
+
+**③ 要素の追加・削除・時間軸の変更を伴う。**
+`edits.cameraShots` は `overrides` / `inserted` / `deletedIds` の3構造。字幕・ショートが「1要素に属性を足す」だけだったのに対し、カメラは並び全体が変わる。そのため**保存結果は1要素ではなく並び全体を返す**（隣のカットの重なり・隙間まで変わるため）。
+
+**★整合性を守るのは Main と検証層だけ**
+
+`build-project.ts`（凍結対象）は次の3つを検査しない。放置すると編集者が理由に気づけない壊れ方をするため、**保存前に必ず塞ぐ**。
+
+| 危険な入力 | build-project.ts の挙動 | 対策 |
+|---|---|---|
+| 存在しない `cameraId` | **`throw new Error('カメラ素材が見つかりません')`** → 再出力ごと失敗 | 「そのプロジェクトに実在する映像素材の role」に限定 |
+| `endSec <= startSec` | **`continue` で黙って捨てる** → 保存できたのにXMLに出ない | ゼロ長・逆転を拒否 |
+| カット同士の重なり | 検査せず V1 に並べる → Premiereのタイムラインが崩れる | 適用後の並びを組み立てて重なりを検出し拒否 |
+
+加えて「全カット削除」（映像トラックが空になる）と「素材の尺を超えるカット」も拒否する。隙間は**禁止しない**（意図的な間の可能性があるため）が、警告として数える。
+
+**★`cameraId` は `asset.id` ではなく `asset.role`**（`wide` / `cam_A` / `cam_B`）。`generate-premiere-xml.ts` が `videos` を `{ id: a.role }` で組み立てているため。ここを取り違えると即座に XML 生成が例外を投げる。
+
+**★人が追加したカットの扱い**
+
+- **IDは `shot-ins-<ミリ秒>`**。解析側の `cameraShotId()` と衝突しない接頭辞を使う。`packages/core` の `timeFromId()`（`/^[a-z]+(?:-[A-Za-z_]+)?-(\d{8,})(?:-(\d+))?$/`）でも時刻を復元できるので、**core を変更せずに**孤立時の時刻表示と再接続が従来どおり働く。
+- **`reason` は `'hold'`（★暫定措置）**。`ShotReason`（`packages/editing/src/types.ts`）は `speech | overlap | laughter | hold | reaction | merged` の閉じた union で、**「人が追加した」を表す値が無い**。この値は FCP7 XML のクリップ名に `(${reason})` として現れるため何かを選ばざるを得ず、「編集者がこのカメラで固定した」意図に最も近い `'hold'` を選んだ。**将来 `ShotReason` に専用の値（`'manual'` 等）を追加できるようになったら差し替える**。差し替え箇所は `camera.ts` の `INSERTED_SHOT_REASON` 1箇所に閉じてある。
+- **変更は `overrides` ではなく `inserted` の中身を直接直す。** `overrides` は解析側のIDにしか当たらないため（`resolve.ts` の `matchEdits`）。
+- **削除は `inserted` から取り除く**（`deletedIds` には積まない）。
+
+**★再出力は `generate-premiere-xml` → `save-artifacts` → `save-project` の3工程（字幕と同じ）**
+
+ショート候補（2工程・XMLを除外）とは逆で、`generate-premiere-xml` が**必須**。カメラ修正はここにしか出ないため、外すと修正がどこにも反映されない。`force` が要るのは他画面と同じ理由（キャッシュキーが `project.edits` を含まない）。工程はMainが固定し、Rendererに選ばせない。
+
+**★重なり・尺超過が残っているうちは再出力させない。** XMLを作り直す唯一の画面なので、壊れたまま書き出させない（`camera-state.ts` の `canExport`）。隙間だけなら出力できる。
+
+**★Renderer 側でも保存前に整合性を見せる**
+
+字幕・ショートの下書きは他要素に影響しなかったが、カメラは時間軸を触るので下書きの段階で隣と重なりうる。Main も保存時に必ず検査するが、そこで初めて弾かれると「保存を押したのに失敗した」体験になる。そこで `camera-state.ts` の `previewIssues()` が下書きを反映した並びを組み立て、**重なりがあれば保存ボタンを押せなくする**。★Main 側の検査を置き換えるものではない（Rendererを信用しない方針は不変）。
+
+**★`syncMode: 'common'` のときの注意**
+`build-project.ts` が `trimStartSec` 分だけ前詰めするため、**XML上の時刻が画面の表示とずれる**。画面は常に解析時刻で表示し、その旨を `syncModeNotice` として明示する（カットの前後関係は変わらない）。
+
+**★今回の制限**
+- カット同士が重なる編集はできない（Premiereのタイムラインが崩れるため）。
+- 最短カット長は 2.5 秒（`DEFAULT_CAMERA_RULES.minShotSec` に合わせた）。
+- 全カットの削除はできない。
+
 ### 字幕IDの形式（★2026-08-03 変更）
 
 字幕IDは開始時刻から作る。**開始時刻が同じキューが複数あるときだけ、2件目以降に連番を付ける。**
@@ -396,6 +461,19 @@ sub-00020960-3    3件目
 | 孤立した判断の検出・提示 | `shorts.ts` の `toOrphaned` | テスト＋実機（再解析シナリオで確認） |
 | 区間の取り違え検出（`rangeChanged`） | `shorts.ts` の `detectRangeChanges` | テスト＋実機（再解析シナリオで確認） |
 
+### 確認画面：カメラ切替（2026-08-05 追加 / Step 7）
+
+| 機能 | 実装場所 | 確認状況 |
+|---|---|---|
+| カメラデータの組み立て・4操作の保存 | `apps/desktop/src/main/camera.ts` | テスト（61件）＋実機（実素材・実core関数で36項目） |
+| 入力検証（ID・カメラ実在・区間・重なり） | `apps/desktop/src/shared/camera-validate.ts` | テスト（50件）＋実機（不正入力8種を拒否） |
+| 画面の状態遷移（＋追加フロー・絞り込み・整合性チェック） | `apps/desktop/src/renderer/camera-state.ts` | テスト（52件） |
+| カメラ切替画面 | `apps/desktop/src/renderer/CameraScreen.tsx` | 実機（データ層・IPC層のみ。ダイアログ経由のUI操作は未確認） |
+| IPCハンドラ（読み込み・変更・追加・削除・取り消し・再出力） | `apps/desktop/src/main/ipc.ts` | テスト（17件）＋実機（CDP経由で実アプリを操作） |
+| 部分再出力（`CAMERA_EXPORT_STEPS` = XML + save-artifacts + save-project） | `apps/desktop/src/main/ipc.ts` | テスト＋実機（**FCP7 XML への反映と xmllint 妥当性を確認**） |
+| 再接続（`reattached`）の検出・提示 | `camera.ts` の `buildCameraData` | テスト＋実機（再解析シナリオ） |
+| 共通検証部品の切り出し | `apps/desktop/src/shared/validate-common.ts` | テスト（5件。`review-validate.test.ts` から移設） |
+
 ---
 
 ## 4. 重要な設計判断
@@ -422,11 +500,11 @@ $ npm run typecheck
 （エラー0件）
 
 $ npm test
-Test Files  41 passed (41)
-     Tests  1048 passed (1048)
+Test Files  45 passed (45)
+     Tests  1228 passed (1228)
 ```
 
-内訳：コア 498件（21ファイル）＋ Electron 550件（20ファイル）。Electronのテストは ffmpeg・faster-whisper を一切起動せず、解析専用プロセスの起動関数を差し替えて検証している。
+内訳：コア 498件（21ファイル）＋ Electron 730件（24ファイル）。Electronのテストは ffmpeg・faster-whisper を一切起動せず、解析専用プロセスの起動関数を差し替えて検証している。
 
 - **実機smoke testの結果**：`cli/src/pipeline.ts`を実プロジェクト（`project.json`＋実際のffmpeg/whisper）に対して複数回実行し、以下を確認済み。
   - フルラン：15/15完了（0失敗・0警告、修正後）
@@ -451,7 +529,7 @@ Test Files  41 passed (41)
   npm run selfcheck
   npm run build
   ```
-- **workspace import 移行後（2026-08-01）に再確認した内容**：型チェック エラー0件、テスト 19ファイル/462件すべてpass（★当時の件数。移行前と同一で、移行がロジックを変えていないことの根拠。現在は41ファイル/1048件）、`npm run pipeline -- --help` が15工程を正常に列挙、`npm run build` 成功。加えて **`--experimental-strip-types` を付けない素の `node` で `dist/pipeline.js`・`dist/core.js` を読み込み、`runPipeline` の取得・15工程の確認・`createProject()`／`resolveProject()` の実行に成功**（＝Electronメインプロセスから解析を呼べることの前提条件を実証済み）。
+- **workspace import 移行後（2026-08-01）に再確認した内容**：型チェック エラー0件、テスト 19ファイル/462件すべてpass（★当時の件数。移行前と同一で、移行がロジックを変えていないことの根拠。現在は45ファイル/1228件）、`npm run pipeline -- --help` が15工程を正常に列挙、`npm run build` 成功。加えて **`--experimental-strip-types` を付けない素の `node` で `dist/pipeline.js`・`dist/core.js` を読み込み、`runPipeline` の取得・15工程の確認・`createProject()`／`resolveProject()` の実行に成功**（＝Electronメインプロセスから解析を呼べることの前提条件を実証済み）。
 - **Electron実機確認（2026-08-01）**：`.selfcheck` のfixtureから作った実プロジェクト（5素材・40秒）に対して、**実際にElectronアプリを起動し、Chrome DevTools Protocol でRendererを操作して**以下を確認した。
   1. アプリ起動・ウィンドウ生成・Reactのマウント（未選択画面の描画）
   2. `window.contentOs` が公開しているキーがちょうど7つ（`selectProject` / `readProjectSummary` / `startPipeline` / `cancelPipeline` / `openProjectFolder` / `onPipelineProgress` / `onPipelineFinished`）**※これは2026-08-01時点の記録。現在は21個**（Step 3で5個、Step 5で9個を追加。最新の一覧は `preload/api.ts` の `ALLOWED_API_KEYS` が唯一の正）
@@ -539,6 +617,50 @@ Test Files  41 passed (41)
   subtitle.srt: 0fb075220addf0e6fb626e251e60b6eb → 0fb075220addf0e6fb626e251e60b6eb（不変）
   ```
   **元素材（wide.mp4 / cam_A.mp4 / mic_A.wav）のMD5も全工程の前後で完全一致**（読むだけ）。
+- **カメラ切替Reviewの実機確認（2026-08-05 / Step 7）**：`.selfcheck` fixture から実プロジェクトを作り、**実ffmpeg・実faster-whisper でフル解析15/15完走**（カメラ切替5カット）。3系統で検証した。
+
+  **(A) 実 `@contentos/core` 関数での検証 — 36項目すべて合格**
+  1. 5カットを読み込め、カメラ候補は `wide` / `cam_A` / `cam_B` のみ（マイクを含まない）
+  2. 表示名（引き / 寄りA）と理由の日本語を返す。連続したカットは重なり0・隙間0
+  3. **DTOに素材の絶対パス・`analysis`・`edits`・文字起こし全文が含まれない**
+  4. カメラを差し替えると**並び全体**が返り、解析の元の値も併せて返る
+  5. **★保存前後で `analysis` が文字列レベルで完全一致**
+  6. **★書き換わるのは `edits.cameraShots` と `edits.history` だけ**（`subtitles` / `shorts` / `chapters` / `markers` は不変）
+  7. **★XMLを壊す入力を6種すべて拒否**：存在しないカメラ / 隣と重なる時刻 / ゼロ長 / 素材の尺を超過 / 重なる追加 / 古い `updatedAt`。拒否後も `overrides` の件数が変わらない
+  8. **★最短2.5秒を下回る変更を拒否**（実データで 33.69→36 秒＝2.31秒を拒否）
+  9. カットの追加ができ、IDが `shot-ins-00037000`、`reason` が `hold`
+  10. 削除で `deletedIds` に積まれ、隙間が警告として数えられる。取り消しでカットが戻る
+
+  **(B) FCP7 XML への反映 — CLI 経由**
+  ```
+  XML MD5:  6a00c81a... → 053c2346...（変化）
+  V1クリップ数: 5 → 6
+  xmllint --noout : 妥当
+  ```
+  V1トラックの中身（カメラ修正がそのまま出ている）：
+  ```
+      0 →  290 : cam_A.mp4 (speech)
+    290 →  590 : wide.mp4 (speech)    ← cam_B から差し替えたカット
+    590 →  770 : wide.mp4 (merged)
+    770 → 1010 : cam_A.mp4 (speech)
+   1010 → 1109 : wide.mp4 (laughter)  ← 40秒→37秒に縮めたカット
+   1109 → 1199 : wide.mp4 (hold)      ← 人が追加したカット（暫定reason）
+  ```
+
+  **(C) 実 Electron アプリ（CDP経由）— 27項目すべて合格**
+  1. **Preloadの公開APIはちょうど31個**（Step 6の25個 + カメラ6個）
+  2. **`window.require` / `window.process` / `window.module` / `window.ipcRenderer` がすべて `undefined`**
+  3. IPC経由で読み込め、再出力の注意書きがDTOに載る
+  4. **DTOに絶対パス・`analysis`・`edits`・`technicalMessage` が含まれない**
+  5. **不正入力8種を拒否**：相対パス / 不正なカットID / 存在しないカメラ / 隣と重なる時刻 / ゼロ長 / 古い `updatedAt` / 重なる追加 / `reason` 指定
+  6. GUIから差し替えると並び全体が返り、再読み込みしても残る
+  7. 再出力の実行工程が `['generate-premiere-xml', 'save-artifacts', 'save-project']`
+  8. **実行中の再出力を `PROJECT_ALREADY_RUNNING` で拒否**、`outcome: 'completed'` で完走
+  9. **GUIでの差し替えが XML に反映**（1カット目が `cam_A` → `cam_B`）。xmllint 妥当
+  10. **既存の字幕Review・ショート候補Reviewが壊れていない**
+  11. アプリ終了後に**孤児プロセス0件**
+
+  **元素材（wide.mp4 / cam_A.mp4 / mic_A.wav）のMD5は全工程の前後で完全一致**（読むだけ）。
 
 ---
 
@@ -566,6 +688,12 @@ Test Files  41 passed (41)
 - **【ショート候補】候補が多数ある場合**：実素材から抽出できた候補が**1本だけ**だったため、数十件でのスクロール性能・絞り込み（すべて/未判断/採用/不採用）の体感・再生位置による自動選択の追随は未計測。
 - **【ショート候補】`rangeChanged` の実素材での発生頻度**：検出ロジックは再解析シナリオを人工的に作って確認したが、**実際の再解析でどのくらいの頻度で起きるか**は未計測（素材や設定を変えて2回解析した実データが無いため）。
 - **【ショート候補】3桁以上のID**：検証の正規表現は `short_100` / `short_1000` を通すことをテストで固定しているが、**実際に候補が100本を超える素材での動作は未確認**。
+- **【カメラ切替】画面上の操作**：データ層・IPC層はCDP経由で実アプリを操作して確認済みだが、**解析画面から「カメラ切替を確認」ボタンを押し、一覧をクリックしてカメラを差し替える・時刻を入力する一連のUI操作は人手で未確認**（ファイル選択ダイアログがOSネイティブで自動化できないため）。状態遷移はリデューサのテスト52件で固定してある。
+- **【カメラ切替】Premiere での実機読み込み**：再出力した FCP7 XML は `xmllint` で妥当性を確認し、V1トラックにカメラ修正が正しく並ぶことも確認したが、**実際に Premiere Pro で開いて意図どおりのタイムラインになるかは未検証**（Premiere実機検証そのものがユーザー側で未実施のため）。★カメラ切替は XML を書き換える唯一の画面なので、Premiere検証時はこの画面で修正した状態でも確認すること。
+- **【カメラ切替】カットが多数ある場合**：実素材のカットが5本だけだったため、数十〜数百カットでのスクロール性能・絞り込みの体感・整合性チェック（`previewIssues` は毎回全件をソートする）の速度は未計測。
+- **【カメラ切替】`syncMode: 'common'` での時刻ずれ**：注意書きは出しているが、**実際に common モードで再出力してXML上の時刻を突き合わせた確認は未実施**。
+- **【カメラ切替】`reason` の暫定措置**：人が追加したカットに `'hold'` を使っている。**Premiereのクリップ名に `(hold)` と出ることの実運用上の見え方は未確認**。
+- **【カメラ切替】3台以上のカメラ**：`wide` / `cam_A` / `cam_B` の3台で確認。`cam_C` を含む4台以上での動作は未確認（`ASSET_ROLES` は `cam_C` まで定義済み）。
 - **【ショート候補】`edits.history` の肥大化**：1回の判断で最大7エントリ（6項目 + `candidateRange`）が追記される。候補が多く判断をやり直すほど `project.json` が膨らむが、**長期運用での実サイズは未計測**。履歴の間引き・圧縮は未実装。
 
 ---
@@ -646,15 +774,28 @@ Electron GUIの前提となる構成の整理を実施済み。**ロジックの
 
 コミット：`7e37d07 feat: add short candidate review and adoption workflow`（19ファイル / +3888行）
 
+### 完了済み：Step 7 — 確認画面（カメラ切替）（2026-08-05）
+
+カメラの差し替え・時間軸の調整・カットの追加/削除/取り消しと、FCP7 XML の再出力まで。**`packages/*` は1ファイルも変更していない**。
+
+- `edits.cameraShots` の3構造（`overrides` / `inserted` / `deletedIds`）すべてに対応
+- **XMLを壊す入力を保存前に拒否**（未知カメラ・重なり・ゼロ長・尺超過・全削除）
+- **再接続（`reattached`）を初めて画面に出した**（カメラIDは時刻を持つため日常的に発生する）
+- 人が追加したカットは `shot-ins-` 接頭辞のIDと暫定 `reason: 'hold'`
+- 再出力は字幕と同じ3工程。**`generate-premiere-xml` は必須**
+- Renderer 側でも保存前に重なりを検出し、保存ボタンを押せなくする
+- Step 7 の最初に `validate-common.ts` を切り出し（挙動は無変更・1048件を維持）
+- テスト180件を追加
+
 ### 次の実装
 
-1. **確認画面 — カメラ切替の修正**（★次に着手。`edits.cameraShots` は `overrides` / `inserted` / `deletedIds` の3構造で、字幕・ショートより複雑。着手前に下の「10. 今後のリファクタリング候補」①②の共通化を検討すること）
-2. **孤立修正の再接続UI**（現在は一覧表示のみ。「この修正をこのキューに付け直す」操作はまだ無い）
-3. **確認画面 — マーカーの修正**（`edits.markers`）
+1. **孤立修正の再接続UI**（現在は一覧表示のみ。「この修正をこのキューに付け直す」操作はまだ無い）
+2. **確認画面 — マーカーの修正**（`edits.markers`。`Record` 構造で字幕に近く、4画面目としては軽い）
+3. **★共通化のリファクタリング**（下の「10. 今後のリファクタリング候補」。3画面が出そろい、共通項が確定した）
 4. 書き出し画面
 5. AI設定（ローカルモードで配線 → GeminiProvider）
 
-※「プロジェクト一覧・素材登録画面」はStep 5、「ショート候補の採否」はStep 6で実装済み。
+※「プロジェクト一覧・素材登録画面」はStep 5、「ショート候補の採否」はStep 6、「カメラ切替の修正」はStep 7で実装済み。
 
 **★保留中の課題**
 
@@ -683,9 +824,10 @@ cd "/Users/kishimototaishi/Desktop/Cloude Code ファイル/workaholic-content-o
 git status
 git log --oneline -5
 git diff --stat
-# → 2026-08-04 時点の最新6件（Step 6 → Step 1 の順）：
+# → 2026-08-05 時点の最新コミット（新しい順）：
+#   （Step 7: カメラ切替Review）
+#   93a3066 docs: record Step 6 design decisions and refactoring candidates
 #   7e37d07 feat: add short candidate review and adoption workflow    ← Step 6
-#   3d290d7 docs: align project status with current implementation
 #   ab322ff feat: add project setup and media registration workflow   ← Step 5
 #   c7dd425 fix: ensure unique and backward-compatible subtitle IDs    ← Step 4
 #   57af003 feat: add subtitle review and safe edit workflow           ← Step 3
@@ -703,7 +845,7 @@ npm install
 # 4. 型チェック（エラー0件が正常）
 npm run typecheck
 
-# 5. 全テスト（本ファイル更新時点で 41 files / 1048 tests / 全pass）
+# 5. 全テスト（本ファイル更新時点で 45 files / 1228 tests / 全pass）
 npm test
 
 # 6. ビルド（dist/ と apps/desktop/dist/ の生成。どちらも .gitignore 済み）
@@ -744,23 +886,33 @@ npm run selfcheck
 - **Rendererに絶対パスやファイルアクセスを渡さないこと。** 再生用メディアは `contentos-media://<token>` のみ。トークンは Main が明示的に登録したパスにしか解決しない。
 - **ショート候補の再出力に `generate-premiere-xml` を足さないこと。** ショート候補は FCP7 XML に含まれないため動かす理由がなく、動かせば Premiere実機検証の対象である成果物を無用に作り直すことになる（`SHORTS_EXPORT_STEPS`）。
 - **`REANALYSIS_WARNING` / `FIELDS_NOT_EXPORTED` を Renderer 側のフラグで消せるようにしないこと。** どちらも実装で回避できない性質を編集者に知らせるもので、Main が本文を持ち DTO に必ず載せる設計になっている。
+- **カメラ切替の再出力から `generate-premiere-xml` を外さないこと。** カメラ修正が反映される成果物は FCP7 XML だけで、`save-artifacts` が書く SRT・CSV・レポートには一切出ない。外すと修正がどこにも反映されない（`CAMERA_EXPORT_STEPS`）。
+- **カメラ切替の検証層（`camera-validate.ts` / `camera.ts` の `assertTimelineSafe`）を緩めないこと。** `build-project.ts`（凍結対象）は未知の `cameraId` で例外を投げ、ゼロ長カットを黙って捨て、重なりを検査しない。この層が最後の砦になっている。
+- **`cameraId` を `asset.id` と取り違えないこと。** `generate-premiere-xml.ts` が `videos` を `{ id: a.role }` で組み立てているため、実体は **role**（`wide` / `cam_A`）。
+- **人が追加したカットの変更を `overrides` に書かないこと。** `overrides` は解析側のIDにしか当たらない（`resolve.ts` の `matchEdits`）。`inserted` の中身を直接直す。
 - **`edits.history` の `field: 'candidateRange'` を人向けの履歴表示に混ぜないこと。** これは人の操作の記録ではなく、区間の取り違えを検出するためのシステム内部の値。履歴を画面に出す実装を作るときは除外する。
 
 ---
 
 ## 10. 今後のリファクタリング候補（★実装しないこと。着手判断は都度ユーザーに確認する）
 
-Step 6 完了時点（2026-08-04）で、字幕Reviewとショート候補Reviewを突き合わせて実測した重複の一覧。**設計を固定するため、今回はあえてリファクタリングしていない。** カメラ切替Review（3画面目）に着手する直前が、重複が確定していて最も安全な共通化のタイミング。
+Step 7 完了時点（2026-08-05）の状況。**3画面が出そろい、共通項が確定した。**
+
+**進捗：優先度Aのうち「validate の依存方向」は Step 7 の最初に解消済み。**
+`validate-common.ts` を新設し、`invalid()` / `CONTROL_CHARS` / `validateExpectedUpdatedAt` / `validateTimeSec` / `validateSingleLineText` / `validateMultiLineText` / `conflictError()` を集約した。字幕・ショート・カメラ・素材登録のすべてがここを見る。**挙動は無変更**（テストも `validate-common.test.ts` へ移設しただけで件数は1048のまま維持）。`review-validate.ts` は字幕固有の検証だけを持つ状態になった。
+
+**残りは未実施。** Step 7 では設計を固定するため、他の共通化はあえて行っていない。
+★カメラは字幕・ショートと同型ではなかった（要素の追加・削除・時間軸・要素間の相互作用を持ち、保存結果が「1要素」ではなく「並び全体」）。そのため下表の `persistAndReload` などは**そのままでは共通化できない**。マーカーReview（4画面目・`Record` 構造で字幕に近い）の着手前が次の判断ポイント。
 
 ### 優先度A：依存の向きと命名（3画面目の前に直す価値が高い）
 
 | 項目 | 現状 | 問題 | 案 |
 |---|---|---|---|
-| `main/review.ts` | 実体は**字幕Review専用**なのに総称的な名前 | 3画面目が「review に依存している」ように読める | `subtitle-review.ts` へ改名 |
-| `shorts-validate.ts` → `review-validate.ts` | `validateExpectedUpdatedAt` / `validateTimeSec` を import | 実体は「共通基盤への依存」だが「**ショートが字幕に依存**」に見える | `validate-common.ts` を新設して両者がそこを見る |
-| `shorts.ts` → `review.ts` | 型と `normalizeAnalysis` を import | 同上 | `review-common.ts` を新設 |
-| `ReviewDeps` | 字幕・ショート共通の依存になったが名前は Review のまま | 3画面目で更に実態とずれる | `ProjectEditDeps` 等 |
-| `countsOf` | `review.ts`（private）と `shorts.ts`（export）に**同名で別シグネチャ** | まとめるとき衝突する | 共通化 or 改名 |
+| ~~validate の依存方向~~ | ✅ **Step 7 で解消済み**（`validate-common.ts`） | — | — |
+| `main/review.ts` | 実体は**字幕Review専用**なのに総称的な名前。しかも `shorts.ts` と `camera.ts` が型と `normalizeAnalysis` をここから import している | 「ショート・カメラが字幕に依存している」ように読める | `subtitle-review.ts` へ改名し、共有部分を `review-common.ts` へ抜く |
+| `ReviewDeps` | 字幕・ショート・カメラ共通の依存になったが名前は Review のまま | 4画面目で更に実態とずれる | `ProjectEditDeps` 等 |
+| `countsOf` | `review.ts`（private）・`shorts.ts`（export）・`camera.ts`（export）に**同名で別シグネチャが3つ** | まとめるとき衝突する | 共通化 or 改名 |
+| `EditsLike` の必須フィールド | 画面が増えるたびに `subtitles` → `+shorts` → `+cameraShots` と必須項目が増える | fixture もそのたび更新が要る | 最小契約にして各画面が narrow する |
 
 ### 優先度B：層ごとの重複（実測値）
 
@@ -768,11 +920,11 @@ Step 6 完了時点（2026-08-04）で、字幕Reviewとショート候補Review
 
 | 対象 | 重複の程度 | 2画面 → 4画面 |
 |---|---|---|
-| `summaryOf()` | **書式以外バイト一致** | 12行 ×2 → ×4 |
-| `persistAndReload()` | 構造完全一致。差は「項目名 / `notFound` の文言 / `build*Data` の呼び先 / 戻り値のフィールド名」の4点のみ | 35行 ×2 → ×4 |
-| `loadProject` の try/catch → `INVALID_PROJECT` | 各ファイル**3箇所ずつ** | 6 → 12 |
-| 競合検出 `updatedAt !== expectedUpdatedAt` → `conflictError()` | 各ファイル2箇所ずつ | 4 → 8 |
-| `toOrphaned()` | `kind` で filter して edit の中身を写す形が同一。差は「どのフィールドを写すか」だけ | 20行 ×2 → ×4 |
+| `summaryOf()` | **3ファイルで書式以外バイト一致** | 12行 ×3 |
+| `persistAndReload()` | 字幕・ショートは構造一致。★**カメラだけ戻り値が「並び全体」で異なる**ため、単純な共通化は不可 | 35行 ×3（要設計） |
+| `loadProject` の try/catch → `INVALID_PROJECT` | 字幕3・ショート3・カメラ1（`loadForSave` に集約済み） | 7箇所 |
+| 競合検出 `updatedAt !== expectedUpdatedAt` | 字幕2・ショート2・カメラ1（`loadForSave` に集約済み） | 5箇所。★カメラの `loadForSave` が良い前例 |
+| `toOrphaned()` | `kind` で filter して edit の中身を写す形が同一。差は「どのフィールドを写すか」だけ | 20行 ×3 |
 | `normalizeAnalysis()` | **既に共有済み**（`review.ts` から export）。良い前例 | — |
 
 **IPC**

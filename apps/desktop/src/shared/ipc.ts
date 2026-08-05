@@ -26,6 +26,14 @@ export const IPC = {
   shortsRemoveDecision: 'contentos:shorts:remove',
   shortsExport: 'contentos:shorts:export',
 
+  /** カメラ切替の確認・修正。 */
+  cameraLoad: 'contentos:camera:load',
+  cameraUpdateShot: 'contentos:camera:update',
+  cameraInsertShot: 'contentos:camera:insert',
+  cameraDeleteShot: 'contentos:camera:delete',
+  cameraRemoveEdit: 'contentos:camera:remove-edit',
+  cameraExport: 'contentos:camera:export',
+
   /** プロジェクト一覧・新規作成・素材登録。 */
   listProjects: 'contentos:setup:list',
   createProject: 'contentos:setup:create',
@@ -60,6 +68,12 @@ export const INVOKE_CHANNELS = [
   IPC.shortsUpdateDecision,
   IPC.shortsRemoveDecision,
   IPC.shortsExport,
+  IPC.cameraLoad,
+  IPC.cameraUpdateShot,
+  IPC.cameraInsertShot,
+  IPC.cameraDeleteShot,
+  IPC.cameraRemoveEdit,
+  IPC.cameraExport,
   IPC.listProjects,
   IPC.createProject,
   IPC.chooseParentDir,

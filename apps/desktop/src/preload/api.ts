@@ -32,6 +32,16 @@ import type {
   UpdateSubtitleEditRequest,
 } from '../shared/review-dto.ts';
 import type {
+  CameraExportRequest,
+  CameraExportResult,
+  CameraLoadResult,
+  DeleteCameraShotRequest,
+  InsertCameraShotRequest,
+  RemoveCameraEditRequest,
+  SaveCameraEditResult,
+  UpdateCameraShotRequest,
+} from '../shared/camera-dto.ts';
+import type {
   RemoveShortDecisionRequest,
   SaveShortDecisionResult,
   ShortsExportRequest,
@@ -85,6 +95,12 @@ export const ALLOWED_API_KEYS = [
   'shortsUpdateDecision',
   'shortsRemoveDecision',
   'shortsExport',
+  'cameraLoad',
+  'cameraUpdateShot',
+  'cameraInsertShot',
+  'cameraDeleteShot',
+  'cameraRemoveEdit',
+  'cameraExport',
   'listProjects',
   'createProject',
   'chooseParentDir',
@@ -192,6 +208,32 @@ export function createDesktopApi(ipc: IpcBridge): ContentOsDesktopApi {
 
     async shortsExport(request: ShortsExportRequest) {
       return (await ipc.invoke(IPC.shortsExport, request)) as ShortsExportResult;
+    },
+
+    // ─── カメラ切替の確認・修正 ───────────────────────────
+
+    async cameraLoad(projectPath: string) {
+      return (await ipc.invoke(IPC.cameraLoad, projectPath)) as CameraLoadResult;
+    },
+
+    async cameraUpdateShot(request: UpdateCameraShotRequest) {
+      return (await ipc.invoke(IPC.cameraUpdateShot, request)) as SaveCameraEditResult;
+    },
+
+    async cameraInsertShot(request: InsertCameraShotRequest) {
+      return (await ipc.invoke(IPC.cameraInsertShot, request)) as SaveCameraEditResult;
+    },
+
+    async cameraDeleteShot(request: DeleteCameraShotRequest) {
+      return (await ipc.invoke(IPC.cameraDeleteShot, request)) as SaveCameraEditResult;
+    },
+
+    async cameraRemoveEdit(request: RemoveCameraEditRequest) {
+      return (await ipc.invoke(IPC.cameraRemoveEdit, request)) as SaveCameraEditResult;
+    },
+
+    async cameraExport(request: CameraExportRequest) {
+      return (await ipc.invoke(IPC.cameraExport, request)) as CameraExportResult;
     },
 
     // ─── プロジェクト一覧・新規作成・素材登録 ─────────────

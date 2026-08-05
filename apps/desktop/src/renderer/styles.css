@@ -890,3 +890,37 @@ body {
   color: var(--blue-dark);
   border-color: var(--blue);
 }
+
+/* ─── カメラ切替Review ─── */
+
+.stat__value--danger {
+  color: var(--danger);
+}
+
+.camera__list .cues__button {
+  grid-template-columns: 190px 60px 1fr auto;
+}
+
+.camera__dur {
+  font-size: 11px;
+  color: var(--gray-600);
+  font-variant-numeric: tabular-nums;
+}
+
+.camera__reason {
+  font-size: 11px;
+  color: var(--gray-400);
+  margin-left: 6px;
+}
+
+/* 開始・終了を横並びにする */
+.camera__times {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.tag--warn {
+  background: var(--warn-soft);
+  color: var(--warn);
+}

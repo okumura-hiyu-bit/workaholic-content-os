@@ -37,6 +37,8 @@ export const DESKTOP_ERROR_CODES = {
   ASSET_NOT_FOUND: 'ASSET_NOT_FOUND',
   /** 指定されたショート候補が見つからない。 */
   SHORT_NOT_FOUND: 'SHORT_NOT_FOUND',
+  /** 指定されたカメラ切替のカットが見つからない。 */
+  CAMERA_SHOT_NOT_FOUND: 'CAMERA_SHOT_NOT_FOUND',
   UNKNOWN: 'UNKNOWN',
 } as const;
 

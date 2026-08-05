@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { safeError } from '../shared/errors.ts';
 import {
+  CAMERA_EXPORT_STEPS,
   createIpcHandlers,
   REVIEW_EXPORT_STEPS,
   SHORTS_EXPORT_STEPS,
@@ -713,6 +714,250 @@ describe('shorts:export', () => {
   it('★不正なパスを拒否する', async () => {
     const { handlers, spawn } = createDeps();
     const result = await handlers.shortsExport({ projectPath: 'relative' });
+    expect(result.ok).toBe(false);
+    expect(spawn).not.toHaveBeenCalled();
+  });
+});
+
+describe('camera:load / update / insert / delete / remove', () => {
+  it('カメラ切替を読み込める', async () => {
+    const { handlers } = createDeps();
+    const result = await handlers.cameraLoad('/tmp/ep012');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.shots.length).toBeGreaterThan(0);
+      expect(result.data.cameras.map((c) => c.cameraId)).toContain('cam_A');
+      expect(result.data.exportNotice).toContain('FCP7 XML');
+    }
+  });
+
+  it('★不正なパスを拒否する', async () => {
+    const { handlers } = createDeps();
+    expect((await handlers.cameraLoad('relative/path')).ok).toBe(false);
+    expect((await handlers.cameraLoad('../../etc/passwd')).ok).toBe(false);
+  });
+
+  it('カメラを差し替えられる', async () => {
+    const { handlers } = createDeps();
+    const loaded = await handlers.cameraLoad('/tmp/ep012');
+    if (!loaded.ok) throw new Error('load failed');
+
+    const result = await handlers.cameraUpdateShot({
+      projectPath: '/tmp/ep012',
+      shotId: 'shot-00010000',
+      expectedUpdatedAt: loaded.data.updatedAt,
+      patch: { cameraId: 'cam_B' },
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.shots[1]?.cameraId).toBe('cam_B');
+  });
+
+  it('★実在しないカメラを検証層で弾く（XML生成が例外を投げるため）', async () => {
+    const { handlers } = createDeps();
+    const loaded = await handlers.cameraLoad('/tmp/ep012');
+    if (!loaded.ok) throw new Error('load failed');
+
+    const result = await handlers.cameraUpdateShot({
+      projectPath: '/tmp/ep012',
+      shotId: 'shot-00010000',
+      expectedUpdatedAt: loaded.data.updatedAt,
+      patch: { cameraId: 'cam_Z' },
+    });
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.error.code).toBe('INVALID_REQUEST');
+  });
+
+  it('★不正な入力を検証層で弾く', async () => {
+    const { handlers } = createDeps();
+    const loaded = await handlers.cameraLoad('/tmp/ep012');
+    if (!loaded.ok) throw new Error('load failed');
+    const base = {
+      projectPath: '/tmp/ep012',
+      expectedUpdatedAt: loaded.data.updatedAt,
+    };
+
+    for (const request of [
+      { ...base, shotId: 'shot-x', patch: { cameraId: 'wide' } },
+      { ...base, shotId: 'shot-00010000', patch: {} },
+      { ...base, shotId: 'shot-00010000', patch: { startSec: -1 } },
+      { ...base, projectPath: 'relative', shotId: 'shot-00010000', patch: { cameraId: 'wide' } },
+      { ...base, expectedUpdatedAt: '2026/08/04', shotId: 'shot-00010000', patch: { cameraId: 'wide' } },
+    ]) {
+      expect((await handlers.cameraUpdateShot(request)).ok).toBe(false);
+    }
+  });
+
+  it('カットを追加できる', async () => {
+    const { handlers } = createDeps();
+    const loaded = await handlers.cameraLoad('/tmp/ep012');
+    if (!loaded.ok) throw new Error('load failed');
+
+    const result = await handlers.cameraInsertShot({
+      projectPath: '/tmp/ep012',
+      expectedUpdatedAt: loaded.data.updatedAt,
+      startSec: 40,
+      endSec: 50,
+      cameraId: 'wide',
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.shots.some((s) => s.inserted)).toBe(true);
+  });
+
+  it('★重なる追加・reason指定・尺超過を拒否する', async () => {
+    const { handlers } = createDeps();
+    const loaded = await handlers.cameraLoad('/tmp/ep012');
+    if (!loaded.ok) throw new Error('load failed');
+    const base = {
+      projectPath: '/tmp/ep012',
+      expectedUpdatedAt: loaded.data.updatedAt,
+      cameraId: 'wide',
+    };
+
+    // 既存カット（10〜25）と重なる
+    expect((await handlers.cameraInsertShot({ ...base, startSec: 20, endSec: 30 })).ok).toBe(false);
+    // reason は指定させない
+    expect(
+      (await handlers.cameraInsertShot({ ...base, startSec: 40, endSec: 50, reason: 'speech' })).ok,
+    ).toBe(false);
+    // ゼロ長
+    expect((await handlers.cameraInsertShot({ ...base, startSec: 40, endSec: 40 })).ok).toBe(false);
+    // 素材の尺（120秒）を超える
+    expect((await handlers.cameraInsertShot({ ...base, startSec: 100, endSec: 200 })).ok).toBe(false);
+  });
+
+  it('カットを削除・取り消しできる', async () => {
+    const { handlers } = createDeps();
+    const loaded = await handlers.cameraLoad('/tmp/ep012');
+    if (!loaded.ok) throw new Error('load failed');
+
+    const deleted = await handlers.cameraDeleteShot({
+      projectPath: '/tmp/ep012',
+      shotId: 'shot-00010000',
+      expectedUpdatedAt: loaded.data.updatedAt,
+    });
+    expect(deleted.ok).toBe(true);
+    if (!deleted.ok) throw new Error('delete failed');
+    expect(deleted.shots).toHaveLength(2);
+
+    const restored = await handlers.cameraRemoveEdit({
+      projectPath: '/tmp/ep012',
+      shotId: 'shot-00010000',
+      expectedUpdatedAt: deleted.updatedAt,
+    });
+    expect(restored.ok).toBe(true);
+    if (restored.ok) expect(restored.shots).toHaveLength(3);
+  });
+
+  it('★古い updatedAt は競合として拒否する', async () => {
+    const { handlers } = createDeps();
+    const loaded = await handlers.cameraLoad('/tmp/ep012');
+    if (!loaded.ok) throw new Error('load failed');
+
+    await handlers.cameraUpdateShot({
+      projectPath: '/tmp/ep012',
+      shotId: 'shot-00010000',
+      expectedUpdatedAt: loaded.data.updatedAt,
+      patch: { cameraId: 'cam_B' },
+    });
+
+    const stale = await handlers.cameraUpdateShot({
+      projectPath: '/tmp/ep012',
+      shotId: 'shot-00025000',
+      expectedUpdatedAt: loaded.data.updatedAt,
+      patch: { cameraId: 'wide' },
+    });
+    expect(stale.ok).toBe(false);
+    expect(stale.ok === false && stale.error.code).toBe('PROJECT_CHANGED');
+  });
+
+  it('★削除・取り消しでも不正な入力を弾く', async () => {
+    const { handlers } = createDeps();
+    const bad = {
+      projectPath: 'relative',
+      shotId: 'shot-00010000',
+      expectedUpdatedAt: '2026-08-01T00:00:00.000Z',
+    };
+    expect((await handlers.cameraDeleteShot(bad)).ok).toBe(false);
+    expect((await handlers.cameraRemoveEdit(bad)).ok).toBe(false);
+  });
+});
+
+describe('camera:export', () => {
+  it('★generate-premiere-xml を含む3工程を実行する', async () => {
+    const { handlers, runManager } = createDeps();
+    const start = vi.spyOn(runManager, 'start');
+    const result = await handlers.cameraExport({ projectPath: '/tmp/ep012' });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.steps).toEqual([
+        'generate-premiere-xml',
+        'save-artifacts',
+        'save-project',
+      ]);
+    }
+    expect(start.mock.calls[0]?.[0].options.onlySteps).toEqual(CAMERA_EXPORT_STEPS);
+  });
+
+  it('★ショートの再出力と違い FCP7 XML を必ず作り直す', () => {
+    expect(CAMERA_EXPORT_STEPS).toContain('generate-premiere-xml');
+    expect(SHORTS_EXPORT_STEPS).not.toContain('generate-premiere-xml');
+    expect(CAMERA_EXPORT_STEPS).toEqual(REVIEW_EXPORT_STEPS);
+  });
+
+  it('★解析・文字起こし・同期を再実行しない', async () => {
+    const { handlers, runManager } = createDeps();
+    const start = vi.spyOn(runManager, 'start');
+    await handlers.cameraExport({ projectPath: '/tmp/ep012' });
+
+    const steps = start.mock.calls[0]?.[0].options.onlySteps ?? [];
+    for (const heavy of [
+      'transcribe',
+      'sync-media',
+      'extract-audio',
+      'detect-speakers',
+      'correct-audio',
+      'probe-media',
+      'generate-camera-plan',
+    ]) {
+      expect(steps).not.toContain(heavy);
+    }
+  });
+
+  it('★force を付ける（editsはキャッシュキーに入らないため）', async () => {
+    const { handlers, runManager } = createDeps();
+    const start = vi.spyOn(runManager, 'start');
+    await handlers.cameraExport({ projectPath: '/tmp/ep012' });
+    expect(start.mock.calls[0]?.[0].options.force).toBe(true);
+  });
+
+  it('★実行中は再出力を拒否する', async () => {
+    const { handlers } = createDeps();
+    const first = await handlers.cameraExport({ projectPath: '/tmp/ep012' });
+    const second = await handlers.cameraExport({ projectPath: '/tmp/ep012' });
+
+    expect(first.ok).toBe(true);
+    expect(second.ok).toBe(false);
+    expect(second.ok === false && second.error.code).toBe('PROJECT_ALREADY_RUNNING');
+  });
+
+  it('★環境が整っていなければ実行しない', async () => {
+    const { handlers, spawn } = createDeps({
+      preflight: () => ({
+        ok: false,
+        error: safeError('ENVIRONMENT_NOT_READY', 'ビルドされていません。'),
+      }),
+    });
+    const result = await handlers.cameraExport({ projectPath: '/tmp/ep012' });
+    expect(result.ok).toBe(false);
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('★不正なパスを拒否する', async () => {
+    const { handlers, spawn } = createDeps();
+    const result = await handlers.cameraExport({ projectPath: 'relative' });
     expect(result.ok).toBe(false);
     expect(spawn).not.toHaveBeenCalled();
   });

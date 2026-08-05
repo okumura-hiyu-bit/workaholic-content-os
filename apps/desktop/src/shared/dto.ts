@@ -24,6 +24,16 @@ import type {
   UpdateAssetRequest,
 } from './setup-dto.ts';
 import type {
+  CameraExportRequest,
+  CameraExportResult,
+  CameraLoadResult,
+  DeleteCameraShotRequest,
+  InsertCameraShotRequest,
+  RemoveCameraEditRequest,
+  SaveCameraEditResult,
+  UpdateCameraShotRequest,
+} from './camera-dto.ts';
+import type {
   RemoveShortDecisionRequest,
   SaveShortDecisionResult,
   ShortsExportRequest,
@@ -189,6 +199,17 @@ export interface ContentOsDesktopApi {
     request: RemoveShortDecisionRequest,
   ): Promise<SaveShortDecisionResult>;
   shortsExport(request: ShortsExportRequest): Promise<ShortsExportResult>;
+
+  /**
+   * カメラ切替の確認・修正。
+   * ★再出力は字幕と同じ3工程。FCP7 XML を作り直す唯一の画面。
+   */
+  cameraLoad(projectPath: string): Promise<CameraLoadResult>;
+  cameraUpdateShot(request: UpdateCameraShotRequest): Promise<SaveCameraEditResult>;
+  cameraInsertShot(request: InsertCameraShotRequest): Promise<SaveCameraEditResult>;
+  cameraDeleteShot(request: DeleteCameraShotRequest): Promise<SaveCameraEditResult>;
+  cameraRemoveEdit(request: RemoveCameraEditRequest): Promise<SaveCameraEditResult>;
+  cameraExport(request: CameraExportRequest): Promise<CameraExportResult>;
 
   /** プロジェクト一覧・新規作成・素材登録。 */
   listProjects(): Promise<ProjectListResult>;

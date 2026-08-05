@@ -15,7 +15,7 @@
 import { basename, dirname } from 'node:path';
 
 import { DESKTOP_ERROR_CODES, safeError } from '../shared/errors.ts';
-import { conflictError } from '../shared/review-validate.ts';
+import { conflictError } from '../shared/validate-common.ts';
 import type {
   AssetDto,
   AssetRoleId,

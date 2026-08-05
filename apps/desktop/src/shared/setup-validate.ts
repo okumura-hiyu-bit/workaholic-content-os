@@ -13,7 +13,7 @@ import {
   type SpeakerSlot,
   type UpdateAssetRequest,
 } from './setup-dto.ts';
-import { validateExpectedUpdatedAt } from './review-validate.ts';
+import { validateExpectedUpdatedAt } from './validate-common.ts';
 import type { Validated } from './validate.ts';
 import { validateProjectPath } from './validate.ts';
 

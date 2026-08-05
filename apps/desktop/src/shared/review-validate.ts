@@ -5,8 +5,6 @@
  * 通す前にここで必ず形を確かめる。fs には触らない純粋な検証。
  */
 
-import type { SafePipelineError } from './dto.ts';
-import { DESKTOP_ERROR_CODES, safeError } from './errors.ts';
 import type {
   RemoveSubtitleEditRequest,
   SubtitleEditPatch,
@@ -14,6 +12,12 @@ import type {
 } from './review-dto.ts';
 import type { Validated } from './validate.ts';
 import { validateProjectPath } from './validate.ts';
+import {
+  CONTROL_CHARS,
+  invalid,
+  validateExpectedUpdatedAt,
+  validateTimeSec,
+} from './validate-common.ts';
 
 /** 字幕本文の上限。1キューは2行程度が前提なので、余裕を見てこの長さで頭打ちにする。 */
 export const MAX_SUBTITLE_LENGTH = 500;
@@ -32,18 +36,6 @@ export const MAX_SUBTITLE_LINES = 8;
 const SUBTITLE_ID = /^sub-[0-9]{8,12}(?:-[0-9]{1,4})?$/;
 /** 話者IDに許す文字。 */
 const SPEAKER_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
-/** ISO 8601（project-store が updatedAt に書く形）。 */
-const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?(Z|[+-]\d{2}:\d{2})$/;
-
-function invalid(userMessage: string, suggestedAction?: string): Validated<never> {
-  return {
-    ok: false,
-    error: safeError(DESKTOP_ERROR_CODES.INVALID_REQUEST, userMessage, {
-      recoverable: true,
-      ...(suggestedAction !== undefined ? { suggestedAction } : {}),
-    }),
-  };
-}
 
 export function validateSubtitleId(value: unknown): Validated<string> {
   if (typeof value !== 'string' || value.length === 0) {
@@ -51,16 +43,6 @@ export function validateSubtitleId(value: unknown): Validated<string> {
   }
   if (!SUBTITLE_ID.test(value)) {
     return invalid('字幕IDの形式が不正です。');
-  }
-  return { ok: true, value };
-}
-
-export function validateExpectedUpdatedAt(value: unknown): Validated<string> {
-  if (typeof value !== 'string' || value.length === 0) {
-    return invalid('プロジェクトの更新時刻が指定されていません。');
-  }
-  if (!ISO_TIMESTAMP.test(value)) {
-    return invalid('プロジェクトの更新時刻の形式が不正です。');
   }
   return { ok: true, value };
 }
@@ -81,7 +63,7 @@ export function validateSubtitleText(value: unknown): Validated<string> {
 
   // 改行(\u000A)以外の制御文字を拒否する。タブ(\u0009)・NUL・エスケープなど。
   // タブまで含めるのが要点：字幕本文に入ると SRT の見た目を壊すため。
-  if (/[\u0000-\u0009\u000B\u000C\u000E-\u001F\u007F]/.test(normalized)) {
+  if (CONTROL_CHARS.test(normalized)) {
     return invalid(
       '字幕本文に使用できない制御文字が含まれています。',
       '貼り付け元の書式を外して、もう一度入力してください。',
@@ -121,21 +103,6 @@ export function validateSpeakerId(
   }
   if (known !== undefined && !known.has(value)) {
     return invalid('このプロジェクトに存在しない話者です。');
-  }
-  return { ok: true, value };
-}
-
-/** 時刻の検証。★今回は編集自体を受け付けないが、値の妥当性も確かめる。 */
-export function validateTimeSec(value: unknown, label: string): Validated<number> {
-  if (typeof value !== 'number' || !Number.isFinite(value)) {
-    return invalid(`${label}の形式が不正です。`);
-  }
-  if (value < 0) {
-    return invalid(`${label}に負の値は指定できません。`);
-  }
-  // 24時間を超える収録は想定しない。異常値でXMLを壊さないための上限。
-  if (value > 24 * 60 * 60) {
-    return invalid(`${label}が範囲外です。`);
   }
   return { ok: true, value };
 }
@@ -242,16 +209,4 @@ export function validateRemoveSubtitleRequest(
       expectedUpdatedAt: expected.value,
     },
   };
-}
-
-/** 競合更新のエラー。文言は画面にそのまま出す。 */
-export function conflictError(): SafePipelineError {
-  return safeError(
-    DESKTOP_ERROR_CODES.PROJECT_CHANGED,
-    'プロジェクトが別の処理で更新されました。再読み込みしてください',
-    {
-      recoverable: true,
-      suggestedAction: '「再読み込み」を押すと最新の内容を取得します。',
-    },
-  );
 }

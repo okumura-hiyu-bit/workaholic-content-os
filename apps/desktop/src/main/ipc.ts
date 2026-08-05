@@ -39,7 +39,27 @@ import {
   validateRemoveAssetRequest,
   validateUpdateAssetRequest,
 } from '../shared/setup-validate.ts';
-import { validateExpectedUpdatedAt } from '../shared/review-validate.ts';
+import { validateExpectedUpdatedAt } from '../shared/validate-common.ts';
+import type {
+  CameraExportResult,
+  CameraLoadResult,
+  SaveCameraEditResult,
+} from '../shared/camera-dto.ts';
+import {
+  validateDeleteCameraShotRequest,
+  validateInsertCameraShotRequest,
+  validateRemoveCameraEditRequest,
+  validateUpdateCameraShotRequest,
+} from '../shared/camera-validate.ts';
+import {
+  applyCameraShotEdit,
+  buildCameraData,
+  cameraOptionsOf,
+  deleteCameraShot,
+  insertCameraShot,
+  removeCameraEdit,
+  timelineDurationOf,
+} from './camera.ts';
 import type {
   SaveShortDecisionResult,
   ShortsExportResult,
@@ -117,6 +137,24 @@ export const REVIEW_EXPORT_STEPS: StepId[] = [
  */
 export const SHORTS_EXPORT_STEPS: StepId[] = ['save-artifacts', 'save-project'];
 
+/**
+ * カメラ切替の再出力で動かす工程。★字幕と同じ3工程。
+ *
+ * ショート候補（2工程）と違い `generate-premiere-xml` は**必須**。
+ * カメラ修正が反映される成果物は FCP7 XML **だけ**で、
+ * `save-artifacts` が書く SRT・CSV・レポートには一切出ないため、
+ * XMLを作り直さなければ修正がどこにも反映されない。
+ *
+ * `save-artifacts` / `save-project` を併せて動かすのは、XMLを作り直した
+ * 事実を成果物一覧と pipeline 状態に残すため（`save-artifacts` は
+ * `generate-premiere-xml` に依存しており、外すと依存が未完了になる）。
+ */
+export const CAMERA_EXPORT_STEPS: StepId[] = [
+  'generate-premiere-xml',
+  'save-artifacts',
+  'save-project',
+];
+
 export interface IpcDeps extends ProjectReaderDeps {
   runManager: RunManager;
   /** 確認画面（Review）用。core の関数と、プレビュー生成を注入する。 */
@@ -162,6 +200,13 @@ export interface IpcHandlers {
   shortsRemoveDecision(rawRequest: unknown): Promise<SaveShortDecisionResult>;
   shortsExport(rawRequest: unknown): Promise<ShortsExportResult>;
 
+  cameraLoad(rawPath: unknown): Promise<CameraLoadResult>;
+  cameraUpdateShot(rawRequest: unknown): Promise<SaveCameraEditResult>;
+  cameraInsertShot(rawRequest: unknown): Promise<SaveCameraEditResult>;
+  cameraDeleteShot(rawRequest: unknown): Promise<SaveCameraEditResult>;
+  cameraRemoveEdit(rawRequest: unknown): Promise<SaveCameraEditResult>;
+  cameraExport(rawRequest: unknown): Promise<CameraExportResult>;
+
   listProjects(): Promise<ProjectListResult>;
   createProject(rawRequest: unknown): Promise<CreateProjectResult>;
   chooseParentDir(): Promise<string | undefined>;
@@ -178,6 +223,52 @@ export interface IpcHandlers {
 }
 
 export function createIpcHandlers(deps: IpcDeps): IpcHandlers {
+  /**
+   * カメラ操作の共通前処理。
+   *
+   * ★「そのプロジェクトに実在する映像素材の role」を集めてから検証する。
+   * この集合を渡さないと未知の cameraId が保存でき、再出力時に
+   * `build-project.ts` が例外を投げて XML 生成ごと失敗する。
+   */
+  function cameraContext(rawRequest: unknown):
+    | {
+        ok: true;
+        projectPath: string;
+        cameras: Set<string>;
+        timelineDurationSec: number;
+      }
+    | { ok: false; error: ReturnType<typeof safeError> } {
+    const path = validateProjectPath(
+      (rawRequest as { projectPath?: unknown } | null)?.projectPath,
+    );
+    if (!path.ok) return { ok: false, error: path.error };
+
+    const summary = readProjectSummary(path.value, deps);
+    if (!summary.ok) return { ok: false, error: summary.error };
+
+    let project;
+    try {
+      project = deps.review.loadProject(summary.summary.projectPath).project;
+    } catch {
+      return {
+        ok: false,
+        error: safeError(
+          DESKTOP_ERROR_CODES.INVALID_PROJECT,
+          'project.json を読み込めませんでした。',
+          { recoverable: true },
+        ),
+      };
+    }
+
+    const options = cameraOptionsOf(project);
+    return {
+      ok: true,
+      projectPath: summary.summary.projectPath,
+      cameras: new Set(options.map((c) => c.cameraId)),
+      timelineDurationSec: timelineDurationOf(options),
+    };
+  }
+
   return {
     async selectProject() {
       const selected = await deps.showProjectDialog();
@@ -409,6 +500,108 @@ export function createIpcHandlers(deps: IpcDeps): IpcHandlers {
       });
       if (!started.ok) return { ok: false, error: started.error };
       return { ok: true, runId: started.runId, steps: [...SHORTS_EXPORT_STEPS] };
+    },
+
+    // ─── カメラ切替の確認・修正 ───────────────────────────
+
+    async cameraLoad(rawPath) {
+      const path = validateProjectPath(rawPath);
+      if (!path.ok) return { ok: false, error: path.error };
+      const summary = readProjectSummary(path.value, deps);
+      if (!summary.ok) return { ok: false, error: summary.error };
+      return buildCameraData(summary.summary.projectPath, deps.review);
+    },
+
+    async cameraUpdateShot(rawRequest) {
+      // ★カメラの実在確認のため、先に候補を集めてから検証する。
+      //   ここを通さないと XML 生成が例外を投げ、再出力ごと失敗する。
+      const context = cameraContext(rawRequest);
+      if (!context.ok) return { ok: false, error: context.error };
+
+      const validated = validateUpdateCameraShotRequest(rawRequest, context.cameras);
+      if (!validated.ok) return { ok: false, error: validated.error };
+      return applyCameraShotEdit(
+        { ...validated.value, projectPath: context.projectPath },
+        deps.review,
+      );
+    },
+
+    async cameraInsertShot(rawRequest) {
+      const context = cameraContext(rawRequest);
+      if (!context.ok) return { ok: false, error: context.error };
+
+      const validated = validateInsertCameraShotRequest(rawRequest, context.cameras, {
+        maxSec: context.timelineDurationSec,
+      });
+      if (!validated.ok) return { ok: false, error: validated.error };
+      return insertCameraShot(
+        { ...validated.value, projectPath: context.projectPath },
+        deps.review,
+      );
+    },
+
+    async cameraDeleteShot(rawRequest) {
+      const validated = validateDeleteCameraShotRequest(rawRequest);
+      if (!validated.ok) return { ok: false, error: validated.error };
+      const summary = readProjectSummary(validated.value.projectPath, deps);
+      if (!summary.ok) return { ok: false, error: summary.error };
+      return deleteCameraShot(
+        { ...validated.value, projectPath: summary.summary.projectPath },
+        deps.review,
+      );
+    },
+
+    async cameraRemoveEdit(rawRequest) {
+      const validated = validateRemoveCameraEditRequest(rawRequest);
+      if (!validated.ok) return { ok: false, error: validated.error };
+      const summary = readProjectSummary(validated.value.projectPath, deps);
+      if (!summary.ok) return { ok: false, error: summary.error };
+      return removeCameraEdit(
+        { ...validated.value, projectPath: summary.summary.projectPath },
+        deps.review,
+      );
+    },
+
+    async cameraExport(rawRequest) {
+      const path = validateProjectPath(
+        (rawRequest as { projectPath?: unknown } | null)?.projectPath,
+      );
+      if (!path.ok) return { ok: false, error: path.error };
+
+      const summary = readProjectSummary(path.value, deps);
+      if (!summary.ok) return { ok: false, error: summary.error };
+
+      const root = deps.resolveRoot();
+      if (!root.ok) return { ok: false, error: root.error };
+
+      const pre = deps.preflight(root.projectRoot);
+      if (!pre.ok) {
+        return {
+          ok: false,
+          error:
+            pre.error ??
+            safeError(
+              DESKTOP_ERROR_CODES.ENVIRONMENT_NOT_READY,
+              '再出力に必要な環境が整っていません。',
+            ),
+        };
+      }
+
+      // ★工程はMainが固定する。排他・進捗は解析と同じ仕組みに乗せる。
+      // ★force が要るのは、キャッシュキーが素材と設定から作られ
+      //   project.edits を含まないため。付けないと「変更なし」でスキップされ、
+      //   カメラ修正が FCP7 XML に出ない。
+      const started = deps.runManager.start({
+        projectPath: summary.summary.projectPath,
+        projectId: summary.summary.projectId,
+        projectRoot: root.projectRoot,
+        options: {
+          onlySteps: CAMERA_EXPORT_STEPS,
+          force: true,
+        },
+      });
+      if (!started.ok) return { ok: false, error: started.error };
+      return { ok: true, runId: started.runId, steps: [...CAMERA_EXPORT_STEPS] };
     },
 
     // ─── プロジェクト一覧・新規作成・素材登録 ─────────────

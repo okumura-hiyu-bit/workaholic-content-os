@@ -30,7 +30,7 @@ import type {
   ShortsSpeaker,
 } from '../shared/shorts-dto.ts';
 import type { ReviewMedia } from '../shared/review-dto.ts';
-import { conflictError } from '../shared/review-validate.ts';
+import { conflictError } from '../shared/validate-common.ts';
 import type {
   AnalysisShortCandidateLike,
   EditsLike,

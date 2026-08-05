@@ -381,6 +381,23 @@ function wire(window: BrowserWindow): RunManager {
     handlers.shortsExport(request),
   );
 
+  ipcMain.handle(IPC.cameraLoad, (_e, path: unknown) => handlers.cameraLoad(path));
+  ipcMain.handle(IPC.cameraUpdateShot, (_e, request: unknown) =>
+    handlers.cameraUpdateShot(request),
+  );
+  ipcMain.handle(IPC.cameraInsertShot, (_e, request: unknown) =>
+    handlers.cameraInsertShot(request),
+  );
+  ipcMain.handle(IPC.cameraDeleteShot, (_e, request: unknown) =>
+    handlers.cameraDeleteShot(request),
+  );
+  ipcMain.handle(IPC.cameraRemoveEdit, (_e, request: unknown) =>
+    handlers.cameraRemoveEdit(request),
+  );
+  ipcMain.handle(IPC.cameraExport, (_e, request: unknown) =>
+    handlers.cameraExport(request),
+  );
+
   ipcMain.handle(IPC.listProjects, () => handlers.listProjects());
   ipcMain.handle(IPC.createProject, (_e, request: unknown) =>
     handlers.createProject(request),

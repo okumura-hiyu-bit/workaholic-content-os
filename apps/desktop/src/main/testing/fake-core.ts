@@ -10,6 +10,7 @@
 import { recordEdit, resolveProject } from '@contentos/core/resolve';
 
 import type {
+  AnalysisCameraShotLike,
   AnalysisShortCandidateLike,
   AnalysisSubtitleLike,
   EditsLike,
@@ -83,6 +84,26 @@ export function shortCandidateFixture(
   return candidate;
 }
 
+/**
+ * カメラ切替のfixture。
+ * IDは `packages/core` の `cameraShotId(startSec)` と同じ形（`shot-<8桁ミリ秒>`）で作る
+ * （検証の正規表現と食い違うと、テストだけが通ってしまうため）。
+ */
+export function cameraShotFixture(
+  startSec: number,
+  endSec: number,
+  cameraId: string,
+  reason = 'speech',
+): AnalysisCameraShotLike {
+  return {
+    id: `shot-${String(Math.round(startSec * 1000)).padStart(8, '0')}`,
+    startSec,
+    endSec,
+    cameraId,
+    reason,
+  };
+}
+
 export function projectFixture(
   overrides: Partial<ProjectLike> = {},
 ): ProjectLike {
@@ -99,7 +120,31 @@ export function projectFixture(
         fileName: 'wide.mp4',
         absolutePath: '/tmp/ep012/raw/wide.mp4',
         hasAudio: true,
-        durationSec: 40,
+        durationSec: 120,
+      },
+      {
+        id: 'camA',
+        role: 'cam_A',
+        fileName: 'cam_A.mp4',
+        absolutePath: '/tmp/ep012/raw/cam_A.mp4',
+        hasAudio: true,
+        durationSec: 120,
+      },
+      {
+        id: 'camB',
+        role: 'cam_B',
+        fileName: 'cam_B.mp4',
+        absolutePath: '/tmp/ep012/raw/cam_B.mp4',
+        hasAudio: true,
+        durationSec: 120,
+      },
+      {
+        id: 'micA',
+        role: 'mic_A',
+        fileName: 'mic_A.wav',
+        absolutePath: '/tmp/ep012/raw/audio/mic_A.wav',
+        hasAudio: true,
+        durationSec: 120,
       },
     ],
     speakers: [
@@ -117,6 +162,11 @@ export function projectFixture(
           speakerId: 'spk_a',
           lowConfidenceWords: [{ text: 'テーマ', probability: 0.52 }],
         }),
+      ],
+      cameraShots: [
+        cameraShotFixture(0, 10, 'wide'),
+        cameraShotFixture(10, 25, 'cam_A', 'speech'),
+        cameraShotFixture(25, 40, 'cam_B', 'reaction'),
       ],
       shortCandidates: [
         shortCandidateFixture(1, 2, 32, {

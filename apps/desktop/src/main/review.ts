@@ -26,7 +26,7 @@ import type {
   SaveSubtitleEditResult,
   SubtitleEditPatch,
 } from '../shared/review-dto.ts';
-import { conflictError } from '../shared/review-validate.ts';
+import { conflictError } from '../shared/validate-common.ts';
 
 // ─── 依存（core の関数を注入で受け取る）──────────────────
 
@@ -67,6 +67,29 @@ export interface ShortDecisionLike {
   note?: string;
 }
 
+/** `@contentos/core` の `IdentifiedCameraShot`。 */
+export interface AnalysisCameraShotLike {
+  id: string;
+  startSec: number;
+  endSec: number;
+  cameraId: string;
+  reason: string;
+}
+
+/** `@contentos/core` の `CameraShotOverride`。 */
+export interface CameraShotOverrideLike {
+  cameraId?: string;
+  startSec?: number;
+  endSec?: number;
+}
+
+/** `@contentos/core` の `EditsLayer['cameraShots']`。★3構造。 */
+export interface CameraEditsLike {
+  overrides: Record<string, CameraShotOverrideLike>;
+  inserted: AnalysisCameraShotLike[];
+  deletedIds: string[];
+}
+
 export interface EditHistoryEntryLike {
   at: string;
   actor: string;
@@ -81,6 +104,8 @@ export interface EditsLike {
   subtitles: Record<string, SubtitleEditLike>;
   /** ショート候補の採否・編集。★Step 6 で使う。 */
   shorts: Record<string, ShortDecisionLike>;
+  /** カメラ切替の変更・追加・削除。★Step 7 で使う。 */
+  cameraShots: CameraEditsLike;
   history: EditHistoryEntryLike[];
   [key: string]: unknown;
 }
@@ -97,6 +122,8 @@ export interface ProjectLike {
     subtitles: AnalysisSubtitleLike[];
     /** ★Step 6（ショート候補Review）で使う。解析前・旧形式では欠けうる。 */
     shortCandidates?: AnalysisShortCandidateLike[];
+    /** ★Step 7（カメラ切替Review）で使う。解析前・旧形式では欠けうる。 */
+    cameraShots?: AnalysisCameraShotLike[];
   };
   edits: EditsLike;
   [key: string]: unknown;
@@ -122,11 +149,27 @@ export interface ResolvedShortLike extends AnalysisShortCandidateLike {
   edited: boolean;
 }
 
+export interface ResolvedCameraShotLike extends AnalysisCameraShotLike {
+  edited: boolean;
+  /** 人が追加したカットか。 */
+  inserted?: boolean;
+}
+
+/** `resolveProject` が返す再接続の記録。★Step 7 で初めて画面に出す。 */
+export interface ReattachedEditLike {
+  kind: string;
+  fromId: string;
+  toId: string;
+  deltaSec: number;
+}
+
 export interface ResolveResultLike {
   resolved: {
     subtitles: ResolvedSubtitleLike[];
     /** ★Step 6 で使う。resolveProject は常に返す。 */
     shorts?: ResolvedShortLike[];
+    /** ★Step 7 で使う。resolveProject は常に返す。 */
+    cameraShots?: ResolvedCameraShotLike[];
   };
   orphaned: {
     kind: string;
@@ -135,7 +178,7 @@ export interface ResolveResultLike {
     edit: unknown;
     reason: string;
   }[];
-  reattached: unknown[];
+  reattached: ReattachedEditLike[];
 }
 
 export interface ReviewDeps {
@@ -148,6 +191,7 @@ export interface ReviewDeps {
     analysis: {
       subtitles: AnalysisSubtitleLike[];
       shortCandidates?: AnalysisShortCandidateLike[];
+      cameraShots?: AnalysisCameraShotLike[];
     },
     edits: EditsLike,
   ): ResolveResultLike;
@@ -156,7 +200,7 @@ export interface ReviewDeps {
     edits: EditsLike,
     entry: {
       /** ★`EditHistoryEntry.kind`（packages/core）の一部。増やすときは本体と揃える。 */
-      kind: 'subtitle' | 'short';
+      kind: 'subtitle' | 'short' | 'cameraShot';
       targetId: string;
       field: string;
       before: unknown;
@@ -374,6 +418,7 @@ export function normalizeAnalysis(analysis: {
 }): {
   subtitles: AnalysisSubtitleLike[];
   shortCandidates: AnalysisShortCandidateLike[];
+  cameraShots: AnalysisCameraShotLike[];
 } {
   const filled: Record<string, unknown> = { ...analysis };
   for (const key of ['cameraShots', 'chapters', 'markers', 'shortCandidates']) {
@@ -382,6 +427,7 @@ export function normalizeAnalysis(analysis: {
   return filled as {
     subtitles: AnalysisSubtitleLike[];
     shortCandidates: AnalysisShortCandidateLike[];
+    cameraShots: AnalysisCameraShotLike[];
   };
 }
 

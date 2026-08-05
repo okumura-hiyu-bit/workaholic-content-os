@@ -9,7 +9,6 @@
  * - 未対応の項目（タイムコード）は黙って無視せず、明示的に断る
  */
 
-import { DESKTOP_ERROR_CODES, safeError } from './errors.ts';
 import type {
   RemoveShortDecisionRequest,
   ShortDecisionPatch,
@@ -17,7 +16,14 @@ import type {
 } from './shorts-dto.ts';
 import type { Validated } from './validate.ts';
 import { validateProjectPath } from './validate.ts';
-import { validateExpectedUpdatedAt, validateTimeSec } from './review-validate.ts';
+import {
+  CONTROL_CHARS,
+  invalid,
+  validateExpectedUpdatedAt,
+  validateMultiLineText,
+  validateSingleLineText,
+  validateTimeSec,
+} from './validate-common.ts';
 
 /** タイトル（YouTube Shorts の表示を想定し、余裕を見た上限）。 */
 export const MAX_SHORT_TITLE_LENGTH = 100;
@@ -42,22 +48,6 @@ export const MAX_SHORT_HASHTAG_LENGTH = 50;
  */
 const SHORT_ID = /^short_[0-9]{2,4}$/;
 
-/**
- * 改行（\n）以外の制御文字。タブ・NUL・エスケープなどを含む。
- * review-validate.ts の validateSubtitleText と同じ集合を使う。
- */
-const CONTROL_CHARS = /[\u0000-\u0009\u000B\u000C\u000E-\u001F\u007F]/;
-
-function invalid(userMessage: string, suggestedAction?: string): Validated<never> {
-  return {
-    ok: false,
-    error: safeError(DESKTOP_ERROR_CODES.INVALID_REQUEST, userMessage, {
-      recoverable: true,
-      ...(suggestedAction !== undefined ? { suggestedAction } : {}),
-    }),
-  };
-}
-
 export function validateShortId(value: unknown): Validated<string> {
   if (typeof value !== 'string' || value.length === 0) {
     return invalid('ショート候補IDが指定されていません。');
@@ -66,64 +56,6 @@ export function validateShortId(value: unknown): Validated<string> {
     return invalid('ショート候補IDの形式が不正です。');
   }
   return { ok: true, value };
-}
-
-/**
- * 1行のテキスト項目（タイトル・フック）。
- * 改行は「1行」の約束を壊すので拒否する。
- */
-export function validateSingleLineText(
-  value: unknown,
-  label: string,
-  maxLength: number,
-): Validated<string> {
-  if (typeof value !== 'string') {
-    return invalid(`${label}の形式が不正です。`);
-  }
-  const normalized = value.replace(/\r\n?/g, '\n');
-  if (normalized.includes('\n')) {
-    return invalid(
-      `${label}に改行は使えません。`,
-      '1行で入力してください。',
-    );
-  }
-  if (CONTROL_CHARS.test(normalized)) {
-    return invalid(
-      `${label}に使用できない制御文字が含まれています。`,
-      '貼り付け元の書式を外して、もう一度入力してください。',
-    );
-  }
-  const trimmed = normalized.trim();
-  if (trimmed.length > maxLength) {
-    return invalid(
-      `${label}が長すぎます（${trimmed.length}文字 / 上限${maxLength}文字）。`,
-    );
-  }
-  return { ok: true, value: trimmed };
-}
-
-/** 複数行のテキスト項目（投稿文・メモ）。改行のみ許す。 */
-export function validateMultiLineText(
-  value: unknown,
-  label: string,
-  maxLength: number,
-): Validated<string> {
-  if (typeof value !== 'string') {
-    return invalid(`${label}の形式が不正です。`);
-  }
-  const normalized = value.replace(/\r\n?/g, '\n');
-  if (CONTROL_CHARS.test(normalized)) {
-    return invalid(
-      `${label}に使用できない制御文字が含まれています。`,
-      '貼り付け元の書式を外して、もう一度入力してください。',
-    );
-  }
-  if (normalized.length > maxLength) {
-    return invalid(
-      `${label}が長すぎます（${normalized.length}文字 / 上限${maxLength}文字）。`,
-    );
-  }
-  return { ok: true, value: normalized };
 }
 
 /**
