@@ -1,8 +1,10 @@
 # CURRENT STATE — 引き継ぎドキュメント
 
-> 作成日: 2026-07-30 / 最終更新: 2026-08-04（Step 1「土台整理」、Step 2「Electron骨組み + IPC」、Step 3「確認画面：字幕」、Step 4「字幕ID重複の解消」、Step 5「プロジェクト一覧・新規作成・素材登録」を反映）。この内容は会話の要約ではなく、**実際のリポジトリ・テスト結果・型チェック結果を根拠に**作成しています。数値は必ず次回セッション側でも再確認してください（本ファイル末尾のコマンド）。
+> 作成日: 2026-07-30 / 最終更新: 2026-08-04（Step 1「土台整理」、Step 2「Electron骨組み + IPC」、Step 3「確認画面：字幕」、Step 4「字幕ID重複の解消」、Step 5「プロジェクト一覧・新規作成・素材登録」、Step 6「確認画面：ショート候補」を反映）。この内容は会話の要約ではなく、**実際のリポジトリ・テスト結果・型チェック結果を根拠に**作成しています。数値は必ず次回セッション側でも再確認してください（本ファイル末尾のコマンド）。
 >
-> **Step 1〜5はすべてコミット済み**（最新: `ab322ff`）。ワーキングツリーに未コミットの実装は残っていません。
+> **Step 1〜6はすべてコミット済み**（最新: `7e37d07`）。ワーキングツリーに未コミットの実装は残っていません。
+> リポジトリはブランチ `main`、リモート `origin`（https://github.com/okumura-hiyu-bit/workaholic-content-os）へpush済みです。
+> テストは **41ファイル / 1048件** 全pass、型チェック エラー0件、ビルド成功。
 
 ---
 
@@ -222,6 +224,69 @@ project.json に絶対パスと ffprobe のメタデータを保存し、元の�
 - **タイムコード編集は未対応。** `SubtitleEdit`（`packages/core`）が `text` / `speakerId` / `deleted` しか持たず、時刻を適用するには凍結対象の `resolve.ts` の変更が必要になるため。要求が来たら黙って無視せず検証で拒否する。
 - **話者の修正は成果物に反映されない（★Premiere実機検証が終わるまで保留）。** `project.edits` には保存され画面にも出るが、`subtitle.srt` は本文のみを使い、`speaker.srt` は `analysis.speech`（発話区間）から作られるため。反映には `save-artifacts.ts`（成果物の中身）の変更が必要で、検証前に出力形式を動かすと検証のやり直しになる。本文の修正は `subtitle.srt` に反映される（実機で確認済み）。
 
+### 確認画面（Review）— ショート候補（2026-08-04 追加 / Step 6）
+
+字幕Reviewと**同じ設計思想**で、ショート候補の採否・編集・保存を行う。3レイヤー分離・`expectedUpdatedAt` による競合検出・`saveProject()` による原子的保存・`recordEdit()` の履歴は字幕と完全に同じ扱い。**`packages/*` は一切変更していない**（差分はすべて `apps/desktop/` 内）。
+
+| 関心事 | 実装 |
+|---|---|
+| データ組み立て・保存 | `apps/desktop/src/main/shorts.ts` |
+| 入力検証 | `apps/desktop/src/shared/shorts-validate.ts` |
+| DTO | `apps/desktop/src/shared/shorts-dto.ts` |
+| 画面 | `apps/desktop/src/renderer/ShortsScreen.tsx` + `shorts-state.ts` |
+| 再出力の工程固定 | `apps/desktop/src/main/ipc.ts` の `SHORTS_EXPORT_STEPS` |
+
+**★人間の判断は `project.edits.shorts` にだけ書く。`project.analysis` は絶対に触らない。**
+実機で保存前後の `analysis` が**文字列レベルで完全一致**することを確認済み。`edits` のうち書き換わるのは `shorts` と `history` だけで、`subtitles` / `cameraShots` / `chapters` / `markers` / `syncOffsets` は初期状態のまま（実機・テスト両方で固定）。
+
+**保存できる項目**：`adopted`（採用 / 不採用 / 未判断）・`title`・`hook`・`caption`・`hashtags`・`note`。いずれも `ShortDecision`（`packages/core`）が既に持つ項目で、**データモデルは変更していない**。
+
+**★再解析でIDが繋がらない（orphaned）— これは仕様**
+
+ショート候補のIDは `short_01` のような**連番で、時刻を含まない**。`resolveProject` は時刻での再接続ができないため、再解析で候補の並びが変わると採否・編集内容は**必ず** `orphaned` になる（`resolve.ts` のコメントに明記されている既存仕様）。実装で回避できないので、次の3つで扱う。
+
+1. 警告文の本体を **Main が持つ**（`shorts.ts` の `REANALYSIS_WARNING`）。DTOに載せて画面に常時表示し、Renderer 側のフラグで消せないようにしている。
+2. 孤立した判断は**内容ごと**返す（採否・タイトル・メモまで）。件数だけでは何を失うのか分からないため。
+3. **`project.json` からは消さない。** 孤立しても `edits.shorts` に残り続けるので、後から手で戻せる。
+
+**★`rangeChanged`（静かな取り違え）の設計理由**
+
+再解析で候補が入れ替わっても、**IDが残っていれば `orphaned` にならない**。つまり「`short_01` の採否が、中身の違う別区間の `short_01` に付いたまま」という状態が起こりうる。孤立と違って画面に何も出ないぶん、こちらの方が危険。
+
+そこで**最初に判断した時点の区間**（`startSec` / `endSec` / `score`）を `recordEdit` の履歴に `field: 'candidateRange'` として残し、読み込み時に現在の解析値と比較して `rangeChanged` を立てる。
+
+- 履歴は追記のみ・`field` は自由文字列なので、**`EditsLayer` の構造は変えていない**。
+- 基準は**最初の1件だけ**。2回目以降の保存で上書きしない（「人が判断したときの状態」を基準にしたいため）。
+- 検出しても**判断を自動で取り消さない**。「要確認」として、判断時の区間と現在の区間を並べて提示するに留める。
+- ★副作用：`edits.history` が「人の操作の記録」と「システムの内部状態」の2用途を持つことになった。将来 history を人向けに表示する実装では `candidateRange` を除外すること。
+
+**★再出力は `save-artifacts` → `save-project` の2工程のみ（字幕の3工程より狭い）**
+
+`generate-premiere-xml` を**意図的に外している**。ショート候補は FCP7 XML に含まれないため動かす理由がなく、動かせば Premiere実機検証の対象である成果物を無用に作り直すことになる。
+
+`save-artifacts` は `generate-premiere-xml` に依存するが、`onlySteps` は依存を自動追加せず「完了済みであること」だけを求める（`registry.ts` の `computeExecutionPlan` / `assertDependenciesSatisfied`）。したがって**一度フル解析を通したプロジェクトなら、XMLを作り直さずに `shorts.csv` だけを更新できる**。未完了なら `DEPENDENCY_NOT_COMPLETED` で止まる（正しい挙動）。実機で FCP7 XML と `subtitle.srt` の MD5 が再出力前後で不変であることを確認済み。
+
+`force` が要るのは字幕と同じ理由（キャッシュキーが `project.edits` を含まない）。工程はMainが固定し、Rendererに選ばせない。
+
+**★`shorts.csv` に反映される項目 / されない項目**
+
+| | 項目 |
+|---|---|
+| **反映される** | `adopted`（採用 / 不採用 / 未判断）・`title` |
+| **反映されない** | `hook`（冒頭フック）・`caption`（投稿文）・`hashtags`・`note`（メモ） |
+
+`save-artifacts.ts`（凍結対象）が書くのは `id,startSec,endSec,score,adopted,title,signals` の7列だけで、それ以外は `project.json` にのみ残る。変えると成果物の中身が変わるため触っていない。**この制限は画面に明記してある**（`FIELDS_NOT_EXPORTED`）。
+
+**★MainにUI文言を置いている理由**
+
+`REANALYSIS_WARNING`（再解析の警告文）と `FIELDS_NOT_EXPORTED`（CSVに出ない項目名）は日本語の表示文言だが、**あえて Main（`shorts.ts`）に置いている**。どちらも実装で回避できない性質を編集者に知らせるもので、Renderer 側の都合で消したり書き換えたりできてはいけないため。DTOに必ず載せ、画面は表示するだけにしている。
+
+トレードオフとして Main が UI 文言に結合している。文言だけを変えたい場合も Main を直すことになる。
+
+**★今回の制限（画面にも明記済み）**
+- **区間（開始・終了時刻）の編集は未対応。** `ShortDecision`（`packages/core`）が時刻を持たず、適用するには凍結対象の `resolve.ts` の変更が必要になるため。要求が来たら黙って無視せず**検証で拒否する**。
+- 上記のとおり `hook` / `caption` / `hashtags` / `note` は成果物に出ない。
+
 ### 字幕IDの形式（★2026-08-03 変更）
 
 字幕IDは開始時刻から作る。**開始時刻が同じキューが複数あるときだけ、2件目以降に連番を付ける。**
@@ -318,6 +383,19 @@ sub-00020960-3    3件目
 | 画面の状態遷移（一覧/作成/素材登録/保存/競合） | `apps/desktop/src/renderer/setup-state.ts` | テスト（20件） |
 | 一覧・新規作成・素材登録の画面 | `apps/desktop/src/renderer/SetupScreen.tsx` | 実機（一覧の描画とAPI疎通。フォーム操作は人手で未確認） |
 
+### 確認画面：ショート候補（2026-08-04 追加 / Step 6）
+
+| 機能 | 実装場所 | 確認状況 |
+|---|---|---|
+| ショートデータの組み立て・採否/編集の保存 | `apps/desktop/src/main/shorts.ts` | テスト（43件）＋実機（実素材・実core関数で25項目） |
+| 採否・編集リクエストの検証 | `apps/desktop/src/shared/shorts-validate.ts` | テスト（37件）＋実機（不正入力6種を拒否） |
+| 画面の状態遷移（loading/ready/dirty/saving/saved/conflict/export-running/export-complete/failed＋絞り込み） | `apps/desktop/src/renderer/shorts-state.ts` | テスト（35件） |
+| ショート候補画面 | `apps/desktop/src/renderer/ShortsScreen.tsx` | 実機（データ層・IPC層のみ。ダイアログ経由のUI操作は未確認） |
+| IPCハンドラ（読み込み・保存・取り消し・再出力） | `apps/desktop/src/main/ipc.ts` | テスト（15件）＋実機（CDP経由で実アプリを操作） |
+| 部分再出力（`SHORTS_EXPORT_STEPS` = save-artifacts + save-project） | `apps/desktop/src/main/ipc.ts` | テスト＋実機（shorts.csv への反映と FCP7 XML 不変を確認） |
+| 孤立した判断の検出・提示 | `shorts.ts` の `toOrphaned` | テスト＋実機（再解析シナリオで確認） |
+| 区間の取り違え検出（`rangeChanged`） | `shorts.ts` の `detectRangeChanges` | テスト＋実機（再解析シナリオで確認） |
+
 ---
 
 ## 4. 重要な設計判断
@@ -344,11 +422,11 @@ $ npm run typecheck
 （エラー0件）
 
 $ npm test
-Test Files  38 passed (38)
-     Tests  918 passed (918)
+Test Files  41 passed (41)
+     Tests  1048 passed (1048)
 ```
 
-内訳：コア 498件（21ファイル）＋ Electron 420件（17ファイル）。Electronのテストは ffmpeg・faster-whisper を一切起動せず、解析専用プロセスの起動関数を差し替えて検証している。
+内訳：コア 498件（21ファイル）＋ Electron 550件（20ファイル）。Electronのテストは ffmpeg・faster-whisper を一切起動せず、解析専用プロセスの起動関数を差し替えて検証している。
 
 - **実機smoke testの結果**：`cli/src/pipeline.ts`を実プロジェクト（`project.json`＋実際のffmpeg/whisper）に対して複数回実行し、以下を確認済み。
   - フルラン：15/15完了（0失敗・0警告、修正後）
@@ -373,7 +451,7 @@ Test Files  38 passed (38)
   npm run selfcheck
   npm run build
   ```
-- **workspace import 移行後（2026-08-01）に再確認した内容**：型チェック エラー0件、テスト 19ファイル/462件すべてpass（★当時の件数。移行前と同一で、移行がロジックを変えていないことの根拠。現在は38ファイル/918件）、`npm run pipeline -- --help` が15工程を正常に列挙、`npm run build` 成功。加えて **`--experimental-strip-types` を付けない素の `node` で `dist/pipeline.js`・`dist/core.js` を読み込み、`runPipeline` の取得・15工程の確認・`createProject()`／`resolveProject()` の実行に成功**（＝Electronメインプロセスから解析を呼べることの前提条件を実証済み）。
+- **workspace import 移行後（2026-08-01）に再確認した内容**：型チェック エラー0件、テスト 19ファイル/462件すべてpass（★当時の件数。移行前と同一で、移行がロジックを変えていないことの根拠。現在は41ファイル/1048件）、`npm run pipeline -- --help` が15工程を正常に列挙、`npm run build` 成功。加えて **`--experimental-strip-types` を付けない素の `node` で `dist/pipeline.js`・`dist/core.js` を読み込み、`runPipeline` の取得・15工程の確認・`createProject()`／`resolveProject()` の実行に成功**（＝Electronメインプロセスから解析を呼べることの前提条件を実証済み）。
 - **Electron実機確認（2026-08-01）**：`.selfcheck` のfixtureから作った実プロジェクト（5素材・40秒）に対して、**実際にElectronアプリを起動し、Chrome DevTools Protocol でRendererを操作して**以下を確認した。
   1. アプリ起動・ウィンドウ生成・Reactのマウント（未選択画面の描画）
   2. `window.contentOs` が公開しているキーがちょうど7つ（`selectProject` / `readProjectSummary` / `startPipeline` / `cancelPipeline` / `openProjectFolder` / `onPipelineProgress` / `onPipelineFinished`）**※これは2026-08-01時点の記録。現在は21個**（Step 3で5個、Step 5で9個を追加。最新の一覧は `preload/api.ts` の `ALLOWED_API_KEYS` が唯一の正）
@@ -422,6 +500,45 @@ Test Files  38 passed (38)
   14. 字幕Reviewへ接続できる（`reviewLoad` が成功）
   15. **元素材のMD5が登録前後で完全一致**（移動・コピー・変更なし）
 - **再出力が依存未完了で失敗する場合の確認**：中止された工程（`correct-audio: cancelled`）が残った状態で再出力すると、`DEPENDENCY_NOT_COMPLETED`「依存する工程「correct-audio」がまだ完了していません。」が返り、**誤った成果物を作らずに停止する**ことを確認した。フル解析を1回通せば解消する。
+- **ショート候補Reviewの実機確認（2026-08-04 / Step 6）**：`.selfcheck` fixture から実プロジェクトを作り、**実ffmpeg・実faster-whisper でフル解析15/15完走**（ショート候補1本抽出）。その上で3系統の検証を行った。
+
+  **(A) 実 `@contentos/core` 関数での検証（フェイクを使わない）— 25項目すべて合格**
+  1. 候補を読み込め、未判断で始まる
+  2. 再解析の警告（`reanalysisWarning`）と CSV非対象項目（`fieldsNotExported`）がDTOに載る
+  3. **DTOに素材の絶対パス・`analysis`・`edits`・文字起こし全文（`words`）が含まれない**
+  4. 採否・タイトル・フック・投稿文・ハッシュタグ・メモを保存でき、`updatedAt` が更新される
+  5. **★保存前後で `analysis` が文字列レベルで完全一致**
+  6. **★書き換わるのは `edits.shorts` と `edits.history` だけ**（`subtitles` / `cameraShots` / `chapters` / `markers` / `syncOffsets` は不変）
+  7. 履歴が `kind: 'short'` で残り、`before` / `after` を保持する
+  8. **判断時の区間が `field: 'candidateRange'` として履歴に残る**
+  9. **古い `updatedAt` を `PROJECT_CHANGED` で拒否し、上書きしない**（拒否後も元の値のまま）
+  10. 解析に無いID（`short_99`）を `SHORT_NOT_FOUND` で拒否し、`edits` に書かない
+  11. 再読み込みしても判断が残る
+
+  **(B) 再解析シナリオ — 10項目すべて合格**
+  - 候補が消えた場合：`orphaned` として**内容ごと**（採否・タイトル・メモ）返し、**`project.json` からは消さない**
+  - IDは残るが区間が変わった場合：`orphaned` にならず `rangeChanged` で検出し、判断時の区間を併せて返す。**判断は自動で取り消さない**
+
+  **(C) 実 Electron アプリ（CDP経由でRendererを操作）— 25項目すべて合格**
+  1. **Preloadの公開APIはちょうど25個**（Step 5の21個 + ショート4個）
+  2. **`window.require` / `window.process` / `window.module` / `window.ipcRenderer` がすべて `undefined`**
+  3. IPC経由でショート候補を読み込め、警告文がDTOに載る
+  4. **DTOに素材の絶対パス・`analysis`・`edits`・`technicalMessage` が含まれない**
+  5. **不正入力6種を拒否**：相対パス / 不正なショートID / 区間の編集（未対応）/ 改行入りタイトル / 古い `updatedAt` / 解析に無いID
+  6. GUIから保存でき、ハッシュタグの先頭 `#` が正規化される。既存の採否・タイトルは保たれる
+  7. 再出力の実行工程が `['save-artifacts', 'save-project']` のみ
+  8. **実行中の再出力を `PROJECT_ALREADY_RUNNING` で拒否**
+  9. 再出力が `DEPENDENCY_NOT_COMPLETED` で止まらず `outcome: 'completed'` で完走
+  10. **既存の字幕Review（`reviewLoad`）が壊れていない**
+  11. アプリ終了後に**孤児プロセス0件**
+
+  **(D) 成果物の実機確認**
+  ```
+  shorts.csv:   short_01,...,未判断,""            → short_01,...,採用,"【実機確認】笑いのピーク"
+  FCP7 XML:     b8a4cc96aa0e01be448678a752607f9c → b8a4cc96aa0e01be448678a752607f9c（不変）
+  subtitle.srt: 0fb075220addf0e6fb626e251e60b6eb → 0fb075220addf0e6fb626e251e60b6eb（不変）
+  ```
+  **元素材（wide.mp4 / cam_A.mp4 / mic_A.wav）のMD5も全工程の前後で完全一致**（読むだけ）。
 
 ---
 
@@ -445,6 +562,11 @@ Test Files  38 passed (38)
 - **【一覧・素材登録】フォーム操作**：新規作成フォームへの入力・素材一覧での役割変更は、状態遷移をリデューサのテスト20件で固定しているが、画面上のクリック操作は人手で未確認。
 - **【一覧】3名以上の出演者**：`SPEAKER_SLOTS` は A/B/C の3枠まで。4名以上には `SPEAKER_SLOTS` と `ASSET_ROLES` の拡張が要る（構造は対応済みだが未検証）。
 - **【確認画面】プレビュー生成の所要時間**：40秒素材で即時。長尺素材での生成時間と、生成中のUIの見え方は未検証（生成は非同期で行うためメインプロセスは止まらない）。
+- **【ショート候補】画面上の操作**：データ層・IPC層はCDP経由で実アプリを操作して確認済みだが、**解析画面から「ショート候補を確認」ボタンを押し、一覧をクリックして採否を切り替える一連のUI操作は人手で未確認**（ファイル選択ダイアログがOSネイティブで自動化できないため、そこから先の画面に到達できない）。状態遷移そのものはリデューサのテスト35件で固定してある。
+- **【ショート候補】候補が多数ある場合**：実素材から抽出できた候補が**1本だけ**だったため、数十件でのスクロール性能・絞り込み（すべて/未判断/採用/不採用）の体感・再生位置による自動選択の追随は未計測。
+- **【ショート候補】`rangeChanged` の実素材での発生頻度**：検出ロジックは再解析シナリオを人工的に作って確認したが、**実際の再解析でどのくらいの頻度で起きるか**は未計測（素材や設定を変えて2回解析した実データが無いため）。
+- **【ショート候補】3桁以上のID**：検証の正規表現は `short_100` / `short_1000` を通すことをテストで固定しているが、**実際に候補が100本を超える素材での動作は未確認**。
+- **【ショート候補】`edits.history` の肥大化**：1回の判断で最大7エントリ（6項目 + `candidateRange`）が追記される。候補が多く判断をやり直すほど `project.json` が膨らむが、**長期運用での実サイズは未計測**。履歴の間引き・圧縮は未実装。
 
 ---
 
@@ -510,15 +632,29 @@ Electron GUIの前提となる構成の整理を実施済み。**ロジックの
 
 **コミット済み**：`ab322ff feat: add project setup and media registration workflow`（24ファイル / +4470行）。コミット前に型チェック・全テスト・ビルド・CLI回帰（`--help` が15工程を列挙）・Review回帰（196件）を実施し、元素材の非変更（`.selfcheck` のfixtureがmtime不変）と `project.analysis` / `project.edits` の非変更を確認済み。
 
+### 完了済み：Step 6 — 確認画面（ショート候補）（2026-08-04）
+
+ショート候補の確認・採否・編集・保存と、`shorts.csv` の部分再出力まで。**`packages/*` は1ファイルも変更していない**（差分はすべて `apps/desktop/` 内）。
+
+- 採否（採用 / 不採用 / 未判断）・タイトル・冒頭フック・投稿文・ハッシュタグ・メモを `project.edits.shorts` にだけ保存（`analysis` は不変。実機で確認済み）
+- `expectedUpdatedAt` による競合更新の検出（上書きしない）
+- **再解析で判断が外れうる旨を常時警告**（Mainが文言を持ち、画面から消せない）
+- 孤立した判断を**内容ごと**提示し、`project.json` からは消さない
+- **`rangeChanged`**：IDが残ったまま区間が入れ替わる「静かな取り違え」を履歴から検出
+- 再出力は `save-artifacts` + `save-project` の2工程のみ（**FCP7 XML は作り直さない**）
+- テスト130件を追加
+
+コミット：`7e37d07 feat: add short candidate review and adoption workflow`（19ファイル / +3888行）
+
 ### 次の実装
 
-1. **確認画面 — カメラ切替の修正**（`edits.cameraShots` は `overrides` / `inserted` / `deletedIds` の3構造。字幕より複雑）
-2. **確認画面 — ショート候補の採否**（`edits.shorts`。IDに時刻を含まないため、候補が変われば必ず `orphaned` になる仕様）
-3. **孤立修正の再接続UI**（現在は一覧表示のみ。「この修正をこのキューに付け直す」操作はまだ無い）
+1. **確認画面 — カメラ切替の修正**（★次に着手。`edits.cameraShots` は `overrides` / `inserted` / `deletedIds` の3構造で、字幕・ショートより複雑。着手前に下の「10. 今後のリファクタリング候補」①②の共通化を検討すること）
+2. **孤立修正の再接続UI**（現在は一覧表示のみ。「この修正をこのキューに付け直す」操作はまだ無い）
+3. **確認画面 — マーカーの修正**（`edits.markers`）
 4. 書き出し画面
 5. AI設定（ローカルモードで配線 → GeminiProvider）
 
-※「プロジェクト一覧・素材登録画面」はStep 5で実装済み（`project.json` を直接選ぶ方式は残してあるが、既定の入口は一覧になった）。
+※「プロジェクト一覧・素材登録画面」はStep 5、「ショート候補の採否」はStep 6で実装済み。
 
 **★保留中の課題**
 
@@ -529,7 +665,15 @@ Electron GUIの前提となる構成の整理を実施済み。**ロジックの
 
 ## 8. 次回セッション開始時の確認コマンド
 
-⚠️ **このリポジトリは git 管理下にある**（2026-08-04 時点。ブランチ `master`・リモート未設定）。ただし**親ディレクトリ `Cloude Code ファイル/` 自体も別のgitリポジトリ**（ブランチ `main`・コミット0件）になっており、リポジトリが入れ子になっている。gitコマンドを打つ前に、必ず `workaholic-content-os/` に `cd` してから実行し、対象リポジトリを取り違えないこと。特に `git add -A` は親リポジトリで実行すると `node_modules/` や `.venv/`、ホーム配下のファイルまで巻き込むため、**必ずパスを明示してステージする**こと。
+⚠️ **このリポジトリは git 管理下にある**（2026-08-04 時点）。
+
+| 項目 | 値 |
+|---|---|
+| ブランチ | `main` |
+| リモート | `origin` → https://github.com/okumura-hiyu-bit/workaholic-content-os |
+| 最新コミット | `7e37d07`（Step 6。push済み） |
+
+ただし**親ディレクトリ `Cloude Code ファイル/` 自体も別のgitリポジトリ**（ブランチ `main`・コミット0件）になっており、リポジトリが入れ子になっている。**親も `main` なので `git branch` の表示だけでは見分けられない。** gitコマンドを打つ前に、必ず `workaholic-content-os/` に `cd` し、`git rev-parse --show-toplevel` で対象リポジトリを確かめること。特に `git add -A` は親リポジトリで実行すると `node_modules/` や `.venv/`、ホーム配下のファイルまで巻き込むため、**必ずパスを明示してステージする**こと。
 
 ```bash
 # 1. 作業ディレクトリの確認（★親も別リポジトリなので必ずcdする）
@@ -539,12 +683,17 @@ cd "/Users/kishimototaishi/Desktop/Cloude Code ファイル/workaholic-content-o
 git status
 git log --oneline -5
 git diff --stat
-# → 2026-08-04 時点の最新5件（この5件がStep 1〜5に対応する）：
+# → 2026-08-04 時点の最新6件（Step 6 → Step 1 の順）：
+#   7e37d07 feat: add short candidate review and adoption workflow    ← Step 6
+#   3d290d7 docs: align project status with current implementation
 #   ab322ff feat: add project setup and media registration workflow   ← Step 5
 #   c7dd425 fix: ensure unique and backward-compatible subtitle IDs    ← Step 4
 #   57af003 feat: add subtitle review and safe edit workflow           ← Step 3
 #   e518367 feat: add Electron desktop pipeline control MVP            ← Step 2
 #   dbe3033 refactor: establish workspace package boundaries and build pipeline ← Step 1
+
+# origin と同期しているか（ahead/behind が出なければ同期済み）
+git status -sb
 
 # 3. 依存の導入（workspace のシンボリックリンクを張るため、clone直後は必須）
 npm install
@@ -554,7 +703,7 @@ npm install
 # 4. 型チェック（エラー0件が正常）
 npm run typecheck
 
-# 5. 全テスト（本ファイル更新時点で 38 files / 918 tests / 全pass）
+# 5. 全テスト（本ファイル更新時点で 41 files / 1048 tests / 全pass）
 npm test
 
 # 6. ビルド（dist/ と apps/desktop/dist/ の生成。どちらも .gitignore 済み）
@@ -593,3 +742,102 @@ npm run selfcheck
 - **確認画面から `project.analysis` を書き換えないこと。** 人間の修正は `project.edits` にだけ書く。表示値は必ず `resolveProject()` に作らせ、独自の突き合わせロジックを増やさない。履歴は `recordEdit()` で残す。
 - **保存時の `expectedUpdatedAt` の照合を外さないこと。** 別ウィンドウやCLIが同じ project.json を更新している可能性があるため、食い違ったら上書きせず競合として返す。
 - **Rendererに絶対パスやファイルアクセスを渡さないこと。** 再生用メディアは `contentos-media://<token>` のみ。トークンは Main が明示的に登録したパスにしか解決しない。
+- **ショート候補の再出力に `generate-premiere-xml` を足さないこと。** ショート候補は FCP7 XML に含まれないため動かす理由がなく、動かせば Premiere実機検証の対象である成果物を無用に作り直すことになる（`SHORTS_EXPORT_STEPS`）。
+- **`REANALYSIS_WARNING` / `FIELDS_NOT_EXPORTED` を Renderer 側のフラグで消せるようにしないこと。** どちらも実装で回避できない性質を編集者に知らせるもので、Main が本文を持ち DTO に必ず載せる設計になっている。
+- **`edits.history` の `field: 'candidateRange'` を人向けの履歴表示に混ぜないこと。** これは人の操作の記録ではなく、区間の取り違えを検出するためのシステム内部の値。履歴を画面に出す実装を作るときは除外する。
+
+---
+
+## 10. 今後のリファクタリング候補（★実装しないこと。着手判断は都度ユーザーに確認する）
+
+Step 6 完了時点（2026-08-04）で、字幕Reviewとショート候補Reviewを突き合わせて実測した重複の一覧。**設計を固定するため、今回はあえてリファクタリングしていない。** カメラ切替Review（3画面目）に着手する直前が、重複が確定していて最も安全な共通化のタイミング。
+
+### 優先度A：依存の向きと命名（3画面目の前に直す価値が高い）
+
+| 項目 | 現状 | 問題 | 案 |
+|---|---|---|---|
+| `main/review.ts` | 実体は**字幕Review専用**なのに総称的な名前 | 3画面目が「review に依存している」ように読める | `subtitle-review.ts` へ改名 |
+| `shorts-validate.ts` → `review-validate.ts` | `validateExpectedUpdatedAt` / `validateTimeSec` を import | 実体は「共通基盤への依存」だが「**ショートが字幕に依存**」に見える | `validate-common.ts` を新設して両者がそこを見る |
+| `shorts.ts` → `review.ts` | 型と `normalizeAnalysis` を import | 同上 | `review-common.ts` を新設 |
+| `ReviewDeps` | 字幕・ショート共通の依存になったが名前は Review のまま | 3画面目で更に実態とずれる | `ProjectEditDeps` 等 |
+| `countsOf` | `review.ts`（private）と `shorts.ts`（export）に**同名で別シグネチャ** | まとめるとき衝突する | 共通化 or 改名 |
+
+### 優先度B：層ごとの重複（実測値）
+
+**Main**
+
+| 対象 | 重複の程度 | 2画面 → 4画面 |
+|---|---|---|
+| `summaryOf()` | **書式以外バイト一致** | 12行 ×2 → ×4 |
+| `persistAndReload()` | 構造完全一致。差は「項目名 / `notFound` の文言 / `build*Data` の呼び先 / 戻り値のフィールド名」の4点のみ | 35行 ×2 → ×4 |
+| `loadProject` の try/catch → `INVALID_PROJECT` | 各ファイル**3箇所ずつ** | 6 → 12 |
+| 競合検出 `updatedAt !== expectedUpdatedAt` → `conflictError()` | 各ファイル2箇所ずつ | 4 → 8 |
+| `toOrphaned()` | `kind` で filter して edit の中身を写す形が同一。差は「どのフィールドを写すか」だけ | 20行 ×2 → ×4 |
+| `normalizeAnalysis()` | **既に共有済み**（`review.ts` から export）。良い前例 | — |
+
+**IPC**
+
+| 対象 | 重複の程度 |
+|---|---|
+| `reviewExport` / `shortsExport` | **差分は工程定数1つとコメントのみ**（約35行）。`createExportHandler(steps)` のファクトリで完全に吸収できる |
+| load ハンドラ | `validateProjectPath` → `readProjectSummary` → `build*Data` の3段が同型 |
+| update ハンドラ | `validate*Request` → `readProjectSummary` → `apply*` の3段が同型 |
+
+**Renderer（状態）**
+
+| 対象 | 重複の程度 |
+|---|---|
+| `canSave` / `canExport` | **型名以外が完全一致** |
+| `export/finished` case | **バイト一致** |
+| reducer の case | 14中**10個が実質同一**（`load/started` `load/failed` `draft/discarded` `save/started` `save/conflicted` `save/failed` `export/started` `export/finished` `playhead/moved` ＋ `save/succeeded` の骨格） |
+| `ReviewState` / `ShortsState` | 11フィールド中**9つが共通** |
+
+**Renderer（画面）**
+
+| 対象 | 重複の程度 |
+|---|---|
+| 再生エリア（`<audio>` + プレイヤー操作） | **約50行が書式以外一致** |
+| `SaveBadge` | 型名以外一致 |
+| `seek` / `togglePlay` / `prepareMedia` | ロジック同一 |
+| `onPipelineFinished` 購読 useEffect | 同一 |
+| loading / failed の早期 return、競合バナー、エラーバナー | 文言以外同一 |
+
+**DTO**
+
+| 対象 | 重複の程度 |
+|---|---|
+| `ReviewMedia` | shorts-dto が**インラインで再定義**（構造的重複） |
+| 保存結果の union | `{ok:true; updatedAt; <item>; counts} \| {ok:false;conflict:true;error} \| {ok:false;conflict?:false;error}` が同型 |
+| `*ExportRequest` / `*ExportResult` / `*LoadResult` | 同型 |
+
+**Validation**
+
+| 対象 | 重複の程度 |
+|---|---|
+| `invalid()` ヘルパ | 両ファイルに重複 |
+| 制御文字の正規表現 | **2箇所で二重定義**（review 側はインライン、shorts 側は定数） |
+| ID検証 | IDの形式は種別ごとに違うので**共有すべきでない**。ただし「正規表現＋文言」を包む薄いファクトリは切り出せる |
+
+### 優先度C：共通化の具体案
+
+**共通Hook**
+
+| 候補 | 吸収できるもの |
+|---|---|
+| `useReviewMedia(projectPath)` | `mediaUrl` / `mediaNote` / `audioRef` / `seek` / `togglePlay` / `prepareMedia` ＋ 再生エリアJSX |
+| `useReviewExport(dispatch, load)` | `onPipelineFinished` 購読 ＋ 購読解除 ＋ `export/started` ディスパッチ |
+| `useProjectReview<TData>({ load, save })` | load→dispatch→エラー分岐、`conflict === true` の振り分け |
+
+**共通Reducer**：`createReviewReducer<TData, TItem, TDraft>({ itemsOf, draftOf, isDraftChanged })` のファクトリ。上表の10 case をベースが持ち、画面固有の case（`filter/changed` 等）だけ拡張で足す。`canSave` / `canExport` は `ReviewStateBase` を引数にすれば1本で済む。
+
+**共通DTO**：`ReviewMediaDto` / `ReviewLoadResult<TData>` / `ReviewSaveResult<TItem, TCounts>` / `ReviewExportRequest` / `ReviewExportResult` / `ReviewCountsBase { edited; orphaned }`。
+
+**共通Validation**：`validate-common.ts` に `invalid()` / `CONTROL_CHARS` / `validateExpectedUpdatedAt` / `validateTimeSec` / `validateSingleLineText` / `validateMultiLineText` / `createIdValidator(pattern, label)` を集約。
+
+### 優先度D：細かい改善
+
+- **`edits.history` の2用途**：`candidateRange` は人の操作ではなくシステムの内部状態。履歴を人向けに表示する実装では除外が必要（§9に明記済み）。
+- **`ShortsScreen.tsx` の `tagText` 二重管理**：ローカル state と reducer の `draft.hashtags` が二重。入力途中の空行を消さないための実装だが、reducer 側に生文字列を持たせれば状態が一箇所にまとまる。
+- **`applyField` の比較**：`JSON.stringify(before ?? null) === JSON.stringify(after ?? null)` は意図が読みにくく、`undefined`/`null` の正規化が2重。`isSameDecisionValue()` に切り出すと明確になる。
+- **不要な export**：`shorts.ts` の `decidedRanges` は外部参照0（内部専用）。`countsOf` も外部参照0。export を外すか、テストで使うかに寄せる。
+- **Main に UI 文言がある**：`REANALYSIS_WARNING` / `FIELDS_NOT_EXPORTED`。**意図的な設計**（画面から消せないことを保証するため）だが、文言だけを変えたい場合も Main を直すことになるトレードオフがある。
