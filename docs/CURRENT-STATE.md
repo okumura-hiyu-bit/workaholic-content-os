@@ -2,7 +2,8 @@
 
 > 作成日: 2026-07-30 / 最終更新: 2026-08-05（Step 1「土台整理」、Step 2「Electron骨組み + IPC」、Step 3「確認画面：字幕」、Step 4「字幕ID重複の解消」、Step 5「プロジェクト一覧・新規作成・素材登録」、Step 6「確認画面：ショート候補」、Step 7「確認画面：カメラ切替」を反映）。この内容は会話の要約ではなく、**実際のリポジトリ・テスト結果・型チェック結果を根拠に**作成しています。数値は必ず次回セッション側でも再確認してください（本ファイル末尾のコマンド）。
 >
-> リポジトリはブランチ `main`、リモート `origin`（https://github.com/okumura-hiyu-bit/workaholic-content-os）。
+> **Step 1〜7はすべてコミット済み**（最新: `4fa9f8d`）。ワーキングツリーに未コミットの実装は残っていません。
+> リポジトリはブランチ `main`、リモート `origin`（https://github.com/okumura-hiyu-bit/workaholic-content-os）へpush済みです。
 > テストは **45ファイル / 1228件** 全pass、型チェック エラー0件、ビルド成功。
 
 ---
@@ -787,6 +788,8 @@ Electron GUIの前提となる構成の整理を実施済み。**ロジックの
 - Step 7 の最初に `validate-common.ts` を切り出し（挙動は無変更・1048件を維持）
 - テスト180件を追加
 
+コミット：`4fa9f8d feat: add camera shot review with timeline-safe editing`（29ファイル / +5748行 −214行）
+
 ### 次の実装
 
 1. **孤立修正の再接続UI**（現在は一覧表示のみ。「この修正をこのキューに付け直す」操作はまだ無い）
@@ -825,7 +828,7 @@ git status
 git log --oneline -5
 git diff --stat
 # → 2026-08-05 時点の最新コミット（新しい順）：
-#   （Step 7: カメラ切替Review）
+#   4fa9f8d feat: add camera shot review with timeline-safe editing  ← Step 7
 #   93a3066 docs: record Step 6 design decisions and refactoring candidates
 #   7e37d07 feat: add short candidate review and adoption workflow    ← Step 6
 #   ab322ff feat: add project setup and media registration workflow   ← Step 5
