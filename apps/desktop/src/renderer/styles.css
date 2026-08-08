@@ -924,3 +924,20 @@ body {
   background: var(--warn-soft);
   color: var(--warn);
 }
+
+/* ─── マーカーReview ─── */
+
+.marker__list .cues__button {
+  grid-template-columns: 190px 90px 1fr auto;
+}
+
+.marker__kind {
+  font-size: 11px;
+  color: var(--gray-600);
+}
+
+/* 種別の絞り込みは状態の絞り込みと別行にする */
+.filters--kinds {
+  flex-wrap: wrap;
+  margin: 10px 0 4px;
+}

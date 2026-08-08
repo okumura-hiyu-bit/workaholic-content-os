@@ -34,6 +34,13 @@ export const IPC = {
   cameraRemoveEdit: 'contentos:camera:remove-edit',
   cameraExport: 'contentos:camera:export',
 
+  /** マーカーの確認・修正。 */
+  markerLoad: 'contentos:marker:load',
+  markerUpdate: 'contentos:marker:update',
+  markerDelete: 'contentos:marker:delete',
+  markerRemoveEdit: 'contentos:marker:remove-edit',
+  markerExport: 'contentos:marker:export',
+
   /** プロジェクト一覧・新規作成・素材登録。 */
   listProjects: 'contentos:setup:list',
   createProject: 'contentos:setup:create',
@@ -74,6 +81,11 @@ export const INVOKE_CHANNELS = [
   IPC.cameraDeleteShot,
   IPC.cameraRemoveEdit,
   IPC.cameraExport,
+  IPC.markerLoad,
+  IPC.markerUpdate,
+  IPC.markerDelete,
+  IPC.markerRemoveEdit,
+  IPC.markerExport,
   IPC.listProjects,
   IPC.createProject,
   IPC.chooseParentDir,

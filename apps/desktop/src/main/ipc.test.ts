@@ -10,6 +10,7 @@ import { safeError } from '../shared/errors.ts';
 import {
   CAMERA_EXPORT_STEPS,
   createIpcHandlers,
+  MARKER_EXPORT_STEPS,
   REVIEW_EXPORT_STEPS,
   SHORTS_EXPORT_STEPS,
   type IpcDeps,
@@ -958,6 +959,218 @@ describe('camera:export', () => {
   it('★不正なパスを拒否する', async () => {
     const { handlers, spawn } = createDeps();
     const result = await handlers.cameraExport({ projectPath: 'relative' });
+    expect(result.ok).toBe(false);
+    expect(spawn).not.toHaveBeenCalled();
+  });
+});
+
+describe('marker:load / update / delete / remove', () => {
+  it('マーカーを読み込める', async () => {
+    const { handlers } = createDeps();
+    const result = await handlers.markerLoad('/tmp/ep012');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.markers.length).toBeGreaterThan(0);
+      expect(result.data.exportNotice).toContain('FCP7 XML');
+      expect(result.data.kinds.map((k) => k.kind)).toContain('CHECK');
+    }
+  });
+
+  it('★不正なパスを拒否する', async () => {
+    const { handlers } = createDeps();
+    expect((await handlers.markerLoad('relative/path')).ok).toBe(false);
+    expect((await handlers.markerLoad('../../etc/passwd')).ok).toBe(false);
+  });
+
+  it('名前を修正できる', async () => {
+    const { handlers } = createDeps();
+    const loaded = await handlers.markerLoad('/tmp/ep012');
+    if (!loaded.ok) throw new Error('load failed');
+
+    const result = await handlers.markerUpdate({
+      projectPath: '/tmp/ep012',
+      markerId: 'mk-TOPIC-00000000',
+      expectedUpdatedAt: loaded.data.updatedAt,
+      patch: { name: '第1章：導入' },
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.marker?.name).toBe('第1章：導入');
+  });
+
+  it('★CHECK マーカー（volatile）も修正できる', async () => {
+    const { handlers } = createDeps();
+    const loaded = await handlers.markerLoad('/tmp/ep012');
+    if (!loaded.ok) throw new Error('load failed');
+
+    const result = await handlers.markerUpdate({
+      projectPath: '/tmp/ep012',
+      markerId: 'mk-CHECK-check-lowconf-7700',
+      expectedUpdatedAt: loaded.data.updatedAt,
+      patch: { comment: '確認した' },
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.marker?.volatileId).toBe(true);
+  });
+
+  it('★不正な入力を検証層で弾く', async () => {
+    const { handlers } = createDeps();
+    const loaded = await handlers.markerLoad('/tmp/ep012');
+    if (!loaded.ok) throw new Error('load failed');
+    const base = {
+      projectPath: '/tmp/ep012',
+      expectedUpdatedAt: loaded.data.updatedAt,
+    };
+
+    for (const request of [
+      { ...base, markerId: 'mk-', patch: { name: 'X' } },
+      { ...base, markerId: 'mk-CHECK-../etc', patch: { name: 'X' } },
+      { ...base, markerId: 'mk-TOPIC-00000000', patch: {} },
+      { ...base, markerId: 'mk-TOPIC-00000000', patch: { name: '' } },
+      { ...base, markerId: 'mk-TOPIC-00000000', patch: { name: 'a\nb' } },
+      { ...base, markerId: 'mk-TOPIC-00000000', patch: { name: 'X', startSec: 5 } },
+      { ...base, markerId: 'mk-TOPIC-00000000', patch: { name: 'X', kind: 'LAUGH' } },
+      { ...base, projectPath: 'relative', markerId: 'mk-TOPIC-00000000', patch: { name: 'X' } },
+      { ...base, expectedUpdatedAt: '2026/08/05', markerId: 'mk-TOPIC-00000000', patch: { name: 'X' } },
+      { ...base, markerId: 'mk-TOPIC-99999999', patch: { name: 'X' } },
+    ]) {
+      expect((await handlers.markerUpdate(request)).ok).toBe(false);
+    }
+  });
+
+  it('★古い updatedAt は競合として拒否する', async () => {
+    const { handlers } = createDeps();
+    const loaded = await handlers.markerLoad('/tmp/ep012');
+    if (!loaded.ok) throw new Error('load failed');
+
+    await handlers.markerUpdate({
+      projectPath: '/tmp/ep012',
+      markerId: 'mk-TOPIC-00000000',
+      expectedUpdatedAt: loaded.data.updatedAt,
+      patch: { name: 'X' },
+    });
+
+    const stale = await handlers.markerUpdate({
+      projectPath: '/tmp/ep012',
+      markerId: 'mk-LAUGH-00033990',
+      expectedUpdatedAt: loaded.data.updatedAt,
+      patch: { name: 'Y' },
+    });
+    expect(stale.ok).toBe(false);
+    expect(stale.ok === false && stale.error.code).toBe('PROJECT_CHANGED');
+  });
+
+  it('削除・取り消しができる', async () => {
+    const { handlers } = createDeps();
+    const loaded = await handlers.markerLoad('/tmp/ep012');
+    if (!loaded.ok) throw new Error('load failed');
+
+    const deleted = await handlers.markerDelete({
+      projectPath: '/tmp/ep012',
+      markerId: 'mk-LAUGH-00033990',
+      expectedUpdatedAt: loaded.data.updatedAt,
+    });
+    expect(deleted.ok).toBe(true);
+    if (!deleted.ok) throw new Error('delete failed');
+    // ★削除したマーカーは一覧から消えるので marker を返さない。
+    expect(deleted.marker).toBeUndefined();
+    expect(deleted.counts.markers).toBe(2);
+
+    const restored = await handlers.markerRemoveEdit({
+      projectPath: '/tmp/ep012',
+      markerId: 'mk-LAUGH-00033990',
+      expectedUpdatedAt: deleted.updatedAt,
+    });
+    expect(restored.ok).toBe(true);
+    if (restored.ok) expect(restored.counts.markers).toBe(3);
+  });
+
+  it('★削除・取り消しでも不正な入力を弾く', async () => {
+    const { handlers } = createDeps();
+    const bad = {
+      projectPath: 'relative',
+      markerId: 'mk-TOPIC-00000000',
+      expectedUpdatedAt: '2026-08-01T00:00:00.000Z',
+    };
+    expect((await handlers.markerDelete(bad)).ok).toBe(false);
+    expect((await handlers.markerRemoveEdit(bad)).ok).toBe(false);
+  });
+});
+
+describe('marker:export', () => {
+  it('★generate-premiere-xml を含む3工程を実行する', async () => {
+    const { handlers, runManager } = createDeps();
+    const start = vi.spyOn(runManager, 'start');
+    const result = await handlers.markerExport({ projectPath: '/tmp/ep012' });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.steps).toEqual([
+        'generate-premiere-xml',
+        'save-artifacts',
+        'save-project',
+      ]);
+    }
+    expect(start.mock.calls[0]?.[0].options.onlySteps).toEqual(MARKER_EXPORT_STEPS);
+  });
+
+  it('★カメラ切替と同じ工程・ショートとは違う（XMLを作り直す）', () => {
+    expect(MARKER_EXPORT_STEPS).toEqual(CAMERA_EXPORT_STEPS);
+    expect(MARKER_EXPORT_STEPS).toContain('generate-premiere-xml');
+    expect(SHORTS_EXPORT_STEPS).not.toContain('generate-premiere-xml');
+  });
+
+  it('★解析・文字起こし・同期を再実行しない', async () => {
+    const { handlers, runManager } = createDeps();
+    const start = vi.spyOn(runManager, 'start');
+    await handlers.markerExport({ projectPath: '/tmp/ep012' });
+
+    const steps = start.mock.calls[0]?.[0].options.onlySteps ?? [];
+    for (const heavy of [
+      'transcribe',
+      'sync-media',
+      'extract-audio',
+      'detect-speakers',
+      'correct-audio',
+      'probe-media',
+      'generate-markers',
+    ]) {
+      expect(steps).not.toContain(heavy);
+    }
+  });
+
+  it('★force を付ける（editsはキャッシュキーに入らないため）', async () => {
+    const { handlers, runManager } = createDeps();
+    const start = vi.spyOn(runManager, 'start');
+    await handlers.markerExport({ projectPath: '/tmp/ep012' });
+    expect(start.mock.calls[0]?.[0].options.force).toBe(true);
+  });
+
+  it('★実行中は再出力を拒否する', async () => {
+    const { handlers } = createDeps();
+    const first = await handlers.markerExport({ projectPath: '/tmp/ep012' });
+    const second = await handlers.markerExport({ projectPath: '/tmp/ep012' });
+
+    expect(first.ok).toBe(true);
+    expect(second.ok).toBe(false);
+    expect(second.ok === false && second.error.code).toBe('PROJECT_ALREADY_RUNNING');
+  });
+
+  it('★環境が整っていなければ実行しない', async () => {
+    const { handlers, spawn } = createDeps({
+      preflight: () => ({
+        ok: false,
+        error: safeError('ENVIRONMENT_NOT_READY', 'ビルドされていません。'),
+      }),
+    });
+    const result = await handlers.markerExport({ projectPath: '/tmp/ep012' });
+    expect(result.ok).toBe(false);
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('★不正なパスを拒否する', async () => {
+    const { handlers, spawn } = createDeps();
+    const result = await handlers.markerExport({ projectPath: 'relative' });
     expect(result.ok).toBe(false);
     expect(spawn).not.toHaveBeenCalled();
   });

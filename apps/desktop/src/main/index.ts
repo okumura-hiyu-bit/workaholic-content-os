@@ -398,6 +398,20 @@ function wire(window: BrowserWindow): RunManager {
     handlers.cameraExport(request),
   );
 
+  ipcMain.handle(IPC.markerLoad, (_e, path: unknown) => handlers.markerLoad(path));
+  ipcMain.handle(IPC.markerUpdate, (_e, request: unknown) =>
+    handlers.markerUpdate(request),
+  );
+  ipcMain.handle(IPC.markerDelete, (_e, request: unknown) =>
+    handlers.markerDelete(request),
+  );
+  ipcMain.handle(IPC.markerRemoveEdit, (_e, request: unknown) =>
+    handlers.markerRemoveEdit(request),
+  );
+  ipcMain.handle(IPC.markerExport, (_e, request: unknown) =>
+    handlers.markerExport(request),
+  );
+
   ipcMain.handle(IPC.listProjects, () => handlers.listProjects());
   ipcMain.handle(IPC.createProject, (_e, request: unknown) =>
     handlers.createProject(request),

@@ -32,6 +32,15 @@ import type {
   UpdateSubtitleEditRequest,
 } from '../shared/review-dto.ts';
 import type {
+  DeleteMarkerRequest,
+  MarkerExportRequest,
+  MarkerExportResult,
+  MarkerLoadResult,
+  RemoveMarkerEditRequest,
+  SaveMarkerEditResult,
+  UpdateMarkerRequest,
+} from '../shared/marker-dto.ts';
+import type {
   CameraExportRequest,
   CameraExportResult,
   CameraLoadResult,
@@ -101,6 +110,11 @@ export const ALLOWED_API_KEYS = [
   'cameraDeleteShot',
   'cameraRemoveEdit',
   'cameraExport',
+  'markerLoad',
+  'markerUpdate',
+  'markerDelete',
+  'markerRemoveEdit',
+  'markerExport',
   'listProjects',
   'createProject',
   'chooseParentDir',
@@ -234,6 +248,28 @@ export function createDesktopApi(ipc: IpcBridge): ContentOsDesktopApi {
 
     async cameraExport(request: CameraExportRequest) {
       return (await ipc.invoke(IPC.cameraExport, request)) as CameraExportResult;
+    },
+
+    // ─── マーカーの確認・修正 ─────────────────────────────
+
+    async markerLoad(projectPath: string) {
+      return (await ipc.invoke(IPC.markerLoad, projectPath)) as MarkerLoadResult;
+    },
+
+    async markerUpdate(request: UpdateMarkerRequest) {
+      return (await ipc.invoke(IPC.markerUpdate, request)) as SaveMarkerEditResult;
+    },
+
+    async markerDelete(request: DeleteMarkerRequest) {
+      return (await ipc.invoke(IPC.markerDelete, request)) as SaveMarkerEditResult;
+    },
+
+    async markerRemoveEdit(request: RemoveMarkerEditRequest) {
+      return (await ipc.invoke(IPC.markerRemoveEdit, request)) as SaveMarkerEditResult;
+    },
+
+    async markerExport(request: MarkerExportRequest) {
+      return (await ipc.invoke(IPC.markerExport, request)) as MarkerExportResult;
     },
 
     // ─── プロジェクト一覧・新規作成・素材登録 ─────────────

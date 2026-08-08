@@ -39,6 +39,10 @@ export const DESKTOP_ERROR_CODES = {
   SHORT_NOT_FOUND: 'SHORT_NOT_FOUND',
   /** 指定されたカメラ切替のカットが見つからない。 */
   CAMERA_SHOT_NOT_FOUND: 'CAMERA_SHOT_NOT_FOUND',
+  /** 指定されたマーカーが見つからない。 */
+  MARKER_NOT_FOUND: 'MARKER_NOT_FOUND',
+  /** IDが重複しているため安全に修正できないマーカー。 */
+  MARKER_NOT_EDITABLE: 'MARKER_NOT_EDITABLE',
   UNKNOWN: 'UNKNOWN',
 } as const;
 

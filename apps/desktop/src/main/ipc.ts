@@ -51,6 +51,22 @@ import {
   validateRemoveCameraEditRequest,
   validateUpdateCameraShotRequest,
 } from '../shared/camera-validate.ts';
+import type {
+  MarkerExportResult,
+  MarkerLoadResult,
+  SaveMarkerEditResult,
+} from '../shared/marker-dto.ts';
+import {
+  validateDeleteMarkerRequest,
+  validateRemoveMarkerEditRequest,
+  validateUpdateMarkerRequest,
+} from '../shared/marker-validate.ts';
+import {
+  applyMarkerEdit,
+  buildMarkerData,
+  deleteMarker,
+  removeMarkerEdit,
+} from './marker.ts';
 import {
   applyCameraShotEdit,
   buildCameraData,
@@ -155,6 +171,21 @@ export const CAMERA_EXPORT_STEPS: StepId[] = [
   'save-project',
 ];
 
+/**
+ * マーカーの再出力で動かす工程。★カメラ切替・字幕と同じ3工程。
+ *
+ * マーカー修正が反映される成果物は FCP7 XML だけ。
+ * `save-artifacts.ts` は `ctx.analysis.markers.length`（＝**解析結果の件数**）を
+ * report.html に出すだけで、`resolved.markers` を使っていない。つまり
+ * 名前・コメント・削除のどれもレポートには出ない。
+ * したがって `generate-premiere-xml` は必須。
+ */
+export const MARKER_EXPORT_STEPS: StepId[] = [
+  'generate-premiere-xml',
+  'save-artifacts',
+  'save-project',
+];
+
 export interface IpcDeps extends ProjectReaderDeps {
   runManager: RunManager;
   /** 確認画面（Review）用。core の関数と、プレビュー生成を注入する。 */
@@ -206,6 +237,12 @@ export interface IpcHandlers {
   cameraDeleteShot(rawRequest: unknown): Promise<SaveCameraEditResult>;
   cameraRemoveEdit(rawRequest: unknown): Promise<SaveCameraEditResult>;
   cameraExport(rawRequest: unknown): Promise<CameraExportResult>;
+
+  markerLoad(rawPath: unknown): Promise<MarkerLoadResult>;
+  markerUpdate(rawRequest: unknown): Promise<SaveMarkerEditResult>;
+  markerDelete(rawRequest: unknown): Promise<SaveMarkerEditResult>;
+  markerRemoveEdit(rawRequest: unknown): Promise<SaveMarkerEditResult>;
+  markerExport(rawRequest: unknown): Promise<MarkerExportResult>;
 
   listProjects(): Promise<ProjectListResult>;
   createProject(rawRequest: unknown): Promise<CreateProjectResult>;
@@ -602,6 +639,90 @@ export function createIpcHandlers(deps: IpcDeps): IpcHandlers {
       });
       if (!started.ok) return { ok: false, error: started.error };
       return { ok: true, runId: started.runId, steps: [...CAMERA_EXPORT_STEPS] };
+    },
+
+    // ─── マーカーの確認・修正 ─────────────────────────────
+
+    async markerLoad(rawPath) {
+      const path = validateProjectPath(rawPath);
+      if (!path.ok) return { ok: false, error: path.error };
+      const summary = readProjectSummary(path.value, deps);
+      if (!summary.ok) return { ok: false, error: summary.error };
+      return buildMarkerData(summary.summary.projectPath, deps.review);
+    },
+
+    async markerUpdate(rawRequest) {
+      const validated = validateUpdateMarkerRequest(rawRequest);
+      if (!validated.ok) return { ok: false, error: validated.error };
+      const summary = readProjectSummary(validated.value.projectPath, deps);
+      if (!summary.ok) return { ok: false, error: summary.error };
+      return applyMarkerEdit(
+        { ...validated.value, projectPath: summary.summary.projectPath },
+        deps.review,
+      );
+    },
+
+    async markerDelete(rawRequest) {
+      const validated = validateDeleteMarkerRequest(rawRequest);
+      if (!validated.ok) return { ok: false, error: validated.error };
+      const summary = readProjectSummary(validated.value.projectPath, deps);
+      if (!summary.ok) return { ok: false, error: summary.error };
+      return deleteMarker(
+        { ...validated.value, projectPath: summary.summary.projectPath },
+        deps.review,
+      );
+    },
+
+    async markerRemoveEdit(rawRequest) {
+      const validated = validateRemoveMarkerEditRequest(rawRequest);
+      if (!validated.ok) return { ok: false, error: validated.error };
+      const summary = readProjectSummary(validated.value.projectPath, deps);
+      if (!summary.ok) return { ok: false, error: summary.error };
+      return removeMarkerEdit(
+        { ...validated.value, projectPath: summary.summary.projectPath },
+        deps.review,
+      );
+    },
+
+    async markerExport(rawRequest) {
+      const path = validateProjectPath(
+        (rawRequest as { projectPath?: unknown } | null)?.projectPath,
+      );
+      if (!path.ok) return { ok: false, error: path.error };
+
+      const summary = readProjectSummary(path.value, deps);
+      if (!summary.ok) return { ok: false, error: summary.error };
+
+      const root = deps.resolveRoot();
+      if (!root.ok) return { ok: false, error: root.error };
+
+      const pre = deps.preflight(root.projectRoot);
+      if (!pre.ok) {
+        return {
+          ok: false,
+          error:
+            pre.error ??
+            safeError(
+              DESKTOP_ERROR_CODES.ENVIRONMENT_NOT_READY,
+              '再出力に必要な環境が整っていません。',
+            ),
+        };
+      }
+
+      // ★工程はMainが固定する。排他・進捗は解析と同じ仕組みに乗せる。
+      // ★force が要るのは、キャッシュキーが素材と設定から作られ
+      //   project.edits を含まないため。
+      const started = deps.runManager.start({
+        projectPath: summary.summary.projectPath,
+        projectId: summary.summary.projectId,
+        projectRoot: root.projectRoot,
+        options: {
+          onlySteps: MARKER_EXPORT_STEPS,
+          force: true,
+        },
+      });
+      if (!started.ok) return { ok: false, error: started.error };
+      return { ok: true, runId: started.runId, steps: [...MARKER_EXPORT_STEPS] };
     },
 
     // ─── プロジェクト一覧・新規作成・素材登録 ─────────────

@@ -1,10 +1,10 @@
 # CURRENT STATE — 引き継ぎドキュメント
 
-> 作成日: 2026-07-30 / 最終更新: 2026-08-05（Step 1「土台整理」、Step 2「Electron骨組み + IPC」、Step 3「確認画面：字幕」、Step 4「字幕ID重複の解消」、Step 5「プロジェクト一覧・新規作成・素材登録」、Step 6「確認画面：ショート候補」、Step 7「確認画面：カメラ切替」を反映）。この内容は会話の要約ではなく、**実際のリポジトリ・テスト結果・型チェック結果を根拠に**作成しています。数値は必ず次回セッション側でも再確認してください（本ファイル末尾のコマンド）。
+> 作成日: 2026-07-30 / 最終更新: 2026-08-05（Step 1「土台整理」、Step 2「Electron骨組み + IPC」、Step 3「確認画面：字幕」、Step 4「字幕ID重複の解消」、Step 5「プロジェクト一覧・新規作成・素材登録」、Step 6「確認画面：ショート候補」、Step 7「確認画面：カメラ切替」、Step 8「確認画面：マーカー」を反映）。この内容は会話の要約ではなく、**実際のリポジトリ・テスト結果・型チェック結果を根拠に**作成しています。数値は必ず次回セッション側でも再確認してください（本ファイル末尾のコマンド）。
 >
-> **Step 1〜7はすべてコミット済み**（最新: `4fa9f8d`）。ワーキングツリーに未コミットの実装は残っていません。
-> リポジトリはブランチ `main`、リモート `origin`（https://github.com/okumura-hiyu-bit/workaholic-content-os）へpush済みです。
-> テストは **45ファイル / 1228件** 全pass、型チェック エラー0件、ビルド成功。
+> **Step 1〜7はコミット済み**（`4fa9f8d` / doc `89830b9`）。**Step 8 は未コミット**（ワーキングツリーにあります）。
+> リポジトリはブランチ `main`、リモート `origin`（https://github.com/okumura-hiyu-bit/workaholic-content-os）。
+> テストは **48ファイル / 1372件** 全pass、型チェック エラー0件、ビルド成功。
 
 ---
 
@@ -151,7 +151,7 @@ cwd固定なら `packages/*` を一切変更せずに同じ結果が得られる
 | 層 | 責務 | してはいけないこと |
 |---|---|---|
 | Main | ウィンドウ生成・IPC受付・入力検証・排他・projectRoot解決・構造化ログ | `runPipeline()` を直接実行しない |
-| Preload | `contextBridge` で21個のAPIだけを公開 | `ipcRenderer` / `fs` / `child_process` を渡さない |
+| Preload | `contextBridge` で36個のAPIだけを公開 | `ipcRenderer` / `fs` / `child_process` を渡さない |
 | Renderer | 表示と操作。状態遷移は純粋なリデューサ | Nodeの機能に触れない（tsconfig.web.json が `types: []` で防ぐ） |
 | 解析専用プロセス | `dist/pipeline.js` を動的importして `runPipeline()` を実行 | `packages/*` を相対パスでimportしない |
 
@@ -353,6 +353,85 @@ project.json に絶対パスと ffprobe のメタデータを保存し、元の�
 - 最短カット長は 2.5 秒（`DEFAULT_CAMERA_RULES.minShotSec` に合わせた）。
 - 全カットの削除はできない。
 
+### 確認画面（Review）— マーカー（2026-08-05 追加 / Step 8）
+
+字幕・ショート候補・カメラ切替と同じ3レイヤー分離・`expectedUpdatedAt` の競合検出・`saveProject()` の原子的保存・`recordEdit()` の履歴で作る。**`packages/*` は1ファイルも変更していない**。
+
+| 関心事 | 実装 |
+|---|---|
+| データ組み立て・保存 | `apps/desktop/src/main/marker.ts` |
+| 入力検証 | `apps/desktop/src/shared/marker-validate.ts` |
+| DTO | `apps/desktop/src/shared/marker-dto.ts` |
+| 画面 | `apps/desktop/src/renderer/MarkerScreen.tsx` + `marker-state.ts` |
+| 再出力の工程固定 | `apps/desktop/src/main/ipc.ts` の `MARKER_EXPORT_STEPS` |
+
+**★マーカーIDには2系統あり、再解析後の挙動が分かれる（実測で確認）**
+
+`generate-markers.ts` は2通りの採番をしている。`timeFromId()` に実IDを通して確認した。
+
+| 種別 | 採番 | `timeFromId` | 再解析後 |
+|---|---|---|---|
+| TOPIC / LAUGH | `markerId(kind, startSec)` → `mk-TOPIC-00000000` | **時刻を返す** | **再接続される**（カメラ切替と同じ） |
+| CHECK | `mk-CHECK-${check.id}` → `mk-CHECK-check-lowconf-7700` | **undefined** | **必ず孤立**（ショート候補と同じ） |
+
+つまり **カメラ型とショート型が同居する初めての画面**。実データでは5件中3件が CHECK（＝孤立する側）だった。
+
+この差を `volatileId` として1件ずつDTOに載せ、**編集画面で個別に警告する**。判定は自前の正規表現を写さず `@contentos/core/project` の `timeFromId()` をそのまま使う（写すと本体が変わったときにここだけ古い判定のまま残るため）。
+
+**★CHECK マーカーの編集は禁止しない。**
+一時的に名前やコメントを付けて確認したい運用があるため、「再解析すると外れる」ことを明示したうえで使えるようにする。外れた内容は消さず「孤立した修正」として内容ごと提示する。
+
+**★種別をまたぐ再接続が起きる（静かな取り違え）**
+
+`resolve.ts` の `matchEdits` は**種別を見ず、時刻の近さだけ**で繋ぎ直す。実測で確認した：
+
+```
+解析側に LAUGH（10.1秒）しか無い状態で TOPIC（10.0秒）への修正を resolve すると
+  reattached: [{ fromId: 'mk-TOPIC-00010000', toId: 'mk-LAUGH-00010100', deltaSec: 0.1 }]
+  resolved  : [{ id: 'mk-LAUGH-00010100', kind: 'LAUGH', name: '第2章：本題へ' }]
+  orphaned  : 0
+```
+
+**章タイトルが笑いマーカーに乗る**。孤立しないので画面に何も出ない。`resolve.ts` は凍結対象なので直せないため、`reattachedKindMismatch`（`reattached.fromId` の接頭辞と現在の `kind` を比較）で検出し「要確認」として提示する。★**システムは検出まで。自動で取り消したり付け替えたりはしない**（ショートの `rangeChanged`・カメラの `reattached` と同じ思想）。
+
+**★マーカーの追加はできない（データモデル上の制約）**
+
+```ts
+markers: Record<string, { name?: string; comment?: string; deleted?: boolean }>
+```
+
+`edits.cameraShots` と違い **`inserted` 配列が無い**。追加するには `packages/core` の `EditsLayer` を変える必要があり変更禁止。**「編集」と「削除」だけの画面**になる。時刻・種別の変更も同じ理由で不可（受け取ったら検証で拒否する）。
+
+**★カメラ切替のような整合性チェックは不要**
+
+`build-project.ts` の `toFcp7Markers` を精査した結果、カメラ切替と違い次のリスクが無い。
+
+- **throw しない**（「カメラ素材が見つかりません」に相当するものが無い）
+- **黙って捨てる条件が無い**（`endFrame <= startFrame` に相当するものが無い）
+- `escapeXml()` が全出力に掛かる（`fcp7xml.ts`）ので XML特殊文字は安全
+- マーカー同士は干渉しない（重なりという概念が無い）
+
+そのため検証層は「長さ・制御文字・未対応項目」だけを見る Subtitle 型に戻り、Renderer 側の `previewIssues` 相当も不要。
+
+**★XMLの名前に `[KIND] ` が自動で前置される**
+
+`markerName()` が `[${marker.kind}] ${marker.name}` を作る。実機で確認済み（`[TOPIC] 【実機確認】第1章：導入`）。人が `name` に `[TOPIC]` と入れると二重になるため画面に明記する（`namePrefixNotice`）。
+
+**★再出力は `generate-premiere-xml` → `save-artifacts` → `save-project` の3工程**
+
+カメラ切替・字幕と同じ。`save-artifacts.ts` は `ctx.analysis.markers.length`（＝**解析結果の件数**）を report.html に出すだけで `resolved.markers` を使わないため、**マーカー修正が反映される成果物は FCP7 XML だけ**。`generate-premiere-xml` は必須。
+
+**★名前は空を拒否、コメントは空を許す**
+
+`resolve.ts` が `edit?.name ?? marker.name` で解決するため、空文字の名前を保存すると「空にしたつもりが解析値に戻る」紛らわしい状態になる。名前を消したいときは修正の取り消しへ誘導する。コメントは補足情報で意図的に空にしたい場合があり、空文字のまま保存して差し支えない。
+
+**★同一種別・同一時刻のID衝突**
+
+`markerId(kind, startSec)` に連番が無いため理論上衝突しうる（実データでは未発生）。字幕IDの重複と同じ扱いで、衝突しているマーカーは**編集不可**にし `duplicateId` で示す。
+
+**★`syncMode: 'common'` のときの注意**
+`build-project.ts` が**共通区間の外にあるマーカーを黙って除外**し、含まれるものの時刻も前に詰める。画面は解析時刻で表示し、その旨を `syncModeNotice` で明示する。
+
 ### 字幕IDの形式（★2026-08-03 変更）
 
 字幕IDは開始時刻から作る。**開始時刻が同じキューが複数あるときだけ、2件目以降に連番を付ける。**
@@ -475,6 +554,19 @@ sub-00020960-3    3件目
 | 再接続（`reattached`）の検出・提示 | `camera.ts` の `buildCameraData` | テスト＋実機（再解析シナリオ） |
 | 共通検証部品の切り出し | `apps/desktop/src/shared/validate-common.ts` | テスト（5件。`review-validate.test.ts` から移設） |
 
+### 確認画面：マーカー（2026-08-05 追加 / Step 8）
+
+| 機能 | 実装場所 | 確認状況 |
+|---|---|---|
+| マーカーデータの組み立て・3操作の保存 | `apps/desktop/src/main/marker.ts` | テスト（57件）＋実機（実素材・実core関数で31項目） |
+| 入力検証（★2系統のID形式・名前・コメント） | `apps/desktop/src/shared/marker-validate.ts` | テスト（31件）＋実機（検証層で11項目・不正入力8種を拒否） |
+| 画面の状態遷移（＋種別×状態の2軸絞り込み） | `apps/desktop/src/renderer/marker-state.ts` | テスト（41件） |
+| マーカー画面 | `apps/desktop/src/renderer/MarkerScreen.tsx` | 実機（データ層・IPC層のみ。ダイアログ経由のUI操作は未確認） |
+| IPCハンドラ（読み込み・修正・削除・取り消し・再出力） | `apps/desktop/src/main/ipc.ts` | テスト（15件）＋実機（CDP経由で実アプリを操作） |
+| 部分再出力（`MARKER_EXPORT_STEPS`） | `apps/desktop/src/main/ipc.ts` | テスト＋実機（**XMLへの反映と xmllint 妥当性を確認**） |
+| ★`volatileId`（再解析で外れるマーカー）の判定 | `marker.ts` の `isVolatileId` | テスト＋実機（実データのCHECK3件すべてで検出） |
+| ★種別またぎ再接続の検出 | `marker.ts` の `toMarkerItem` | テスト＋実機（TOPIC→LAUGH を再現） |
+
 ---
 
 ## 4. 重要な設計判断
@@ -501,11 +593,11 @@ $ npm run typecheck
 （エラー0件）
 
 $ npm test
-Test Files  45 passed (45)
-     Tests  1228 passed (1228)
+Test Files  48 passed (48)
+     Tests  1372 passed (1372)
 ```
 
-内訳：コア 498件（21ファイル）＋ Electron 730件（24ファイル）。Electronのテストは ffmpeg・faster-whisper を一切起動せず、解析専用プロセスの起動関数を差し替えて検証している。
+内訳：コア 498件（21ファイル）＋ Electron 874件（27ファイル）。Electronのテストは ffmpeg・faster-whisper を一切起動せず、解析専用プロセスの起動関数を差し替えて検証している。
 
 - **実機smoke testの結果**：`cli/src/pipeline.ts`を実プロジェクト（`project.json`＋実際のffmpeg/whisper）に対して複数回実行し、以下を確認済み。
   - フルラン：15/15完了（0失敗・0警告、修正後）
@@ -530,10 +622,10 @@ Test Files  45 passed (45)
   npm run selfcheck
   npm run build
   ```
-- **workspace import 移行後（2026-08-01）に再確認した内容**：型チェック エラー0件、テスト 19ファイル/462件すべてpass（★当時の件数。移行前と同一で、移行がロジックを変えていないことの根拠。現在は45ファイル/1228件）、`npm run pipeline -- --help` が15工程を正常に列挙、`npm run build` 成功。加えて **`--experimental-strip-types` を付けない素の `node` で `dist/pipeline.js`・`dist/core.js` を読み込み、`runPipeline` の取得・15工程の確認・`createProject()`／`resolveProject()` の実行に成功**（＝Electronメインプロセスから解析を呼べることの前提条件を実証済み）。
+- **workspace import 移行後（2026-08-01）に再確認した内容**：型チェック エラー0件、テスト 19ファイル/462件すべてpass（★当時の件数。移行前と同一で、移行がロジックを変えていないことの根拠。現在は48ファイル/1372件）、`npm run pipeline -- --help` が15工程を正常に列挙、`npm run build` 成功。加えて **`--experimental-strip-types` を付けない素の `node` で `dist/pipeline.js`・`dist/core.js` を読み込み、`runPipeline` の取得・15工程の確認・`createProject()`／`resolveProject()` の実行に成功**（＝Electronメインプロセスから解析を呼べることの前提条件を実証済み）。
 - **Electron実機確認（2026-08-01）**：`.selfcheck` のfixtureから作った実プロジェクト（5素材・40秒）に対して、**実際にElectronアプリを起動し、Chrome DevTools Protocol でRendererを操作して**以下を確認した。
   1. アプリ起動・ウィンドウ生成・Reactのマウント（未選択画面の描画）
-  2. `window.contentOs` が公開しているキーがちょうど7つ（`selectProject` / `readProjectSummary` / `startPipeline` / `cancelPipeline` / `openProjectFolder` / `onPipelineProgress` / `onPipelineFinished`）**※これは2026-08-01時点の記録。現在は21個**（Step 3で5個、Step 5で9個を追加。最新の一覧は `preload/api.ts` の `ALLOWED_API_KEYS` が唯一の正）
+  2. `window.contentOs` が公開しているキーがちょうど7つ（`selectProject` / `readProjectSummary` / `startPipeline` / `cancelPipeline` / `openProjectFolder` / `onPipelineProgress` / `onPipelineFinished`）**※これは2026-08-01時点の記録。現在は36個**（Step 3で+5、Step 5で+9、Step 6で+4、Step 7で+6、Step 8で+5。最新の一覧は `preload/api.ts` の `ALLOWED_API_KEYS` が唯一の正）
   3. **Rendererから `window.require` / `window.process` / `window.module` / `window.ipcRenderer` がすべて `undefined`**（contextIsolation + sandbox が効いている）
   4. `readProjectSummary` が案件名・ID・パス・ステータス・素材数・最終更新を返す
   5. 不正入力の拒否：相対パス・未知の工程ID（`rm -rf /`）・不正なrunId（`../../etc/passwd`）がすべて `INVALID_REQUEST` で拒否され、解析プロセスは起動しない
@@ -662,6 +754,48 @@ Test Files  45 passed (45)
   11. アプリ終了後に**孤児プロセス0件**
 
   **元素材（wide.mp4 / cam_A.mp4 / mic_A.wav）のMD5は全工程の前後で完全一致**（読むだけ）。
+- **マーカーReviewの実機確認（2026-08-05 / Step 8）**：Step 7 と同じ実プロジェクト（実ffmpeg・faster-whisper でフル解析済み・マーカー5件）に対して4系統で検証した。
+
+  **(A) 実 `@contentos/core` 関数での検証 — 31項目すべて合格**
+  1. 実データの5マーカーを読み込め、種別ごとの件数（TOPIC1 / LAUGH1 / **CHECK3**）を返す
+  2. **★実データの CHECK 3件すべてに `volatileId` が立ち、TOPIC / LAUGH には立たない**
+  3. 注意書き（XML限定・`[KIND]` 前置）と、時刻編集・追加が未対応であることを返す
+  4. **DTOに素材の絶対パス・`analysis`・`edits`・文字起こし全文が含まれない**
+  5. 名前とコメントを修正でき、解析の元の値も併せて返る
+  6. **★CHECK（volatile）も編集を許可する**（方針どおり禁止しない）
+  7. **★保存前後で `analysis` が文字列レベルで完全一致**
+  8. **★書き換わるのは `edits.markers` と `edits.history` だけ**
+  9. 削除すると一覧から消えるが**`analysis` からは消さない**（戻せる状態を保つ）。取り消しで戻る
+  10. **★再解析シナリオ**：TOPIC は時刻で繋ぎ直され修正が生き、CHECK は「IDから時刻を読み取れず」で孤立して内容ごと提示される。孤立しても `project.json` からは消さない
+  11. **★★種別またぎの検出**：TOPIC への修正が LAUGH マーカーへ繋ぎ直された状況を再現し、`reattachedKindMismatch` で検出。**自動では取り消さない**
+
+  **(B) 検証層（実データのIDを通す）— 11項目すべて合格**
+  実プロジェクトの5つのマーカーIDすべてが検証層を通ること（★2系統の形式を両方受けられること）を確認。加えて不正入力8種を拒否：空の名前 / 名前に改行 / 時刻の編集 / 種類の変更 / 内容なし / 相対パス / パス断片のID / 古い形式の `updatedAt`。**コメントの空文字は許可**することも確認。
+
+  **(C) FCP7 XML への反映 — CLI 経由**
+  ```
+  XML MD5: eec9a0d6... → d93ef170...（変化）  マーカー数: 5 → 4（削除を反映）  xmllint 妥当
+    in=   0 '[TOPIC] 【実機確認】第1章：導入'   comment='人が直した章名'
+    in= 231 '[CHECK] 確認済み（一時メモ）'      ← ★CHECK の一時編集も反映される
+    in= 990 '[CHECK] 要確認'
+    in=1019 '[LAUGH] 笑い（2.0秒）'
+  ```
+  `[KIND] ` の自動前置と、削除したマーカーがXMLから消えることを実物で確認。
+
+  **(D) 実 Electron アプリ（CDP経由）— 30項目すべて合格**
+  1. **Preloadの公開APIはちょうど36個**（Step 7の31個 + マーカー5個）
+  2. **`window.require` / `window.process` / `window.module` / `window.ipcRenderer` がすべて `undefined`**
+  3. IPC経由で読み込め、削除を反映した4件が返る。CHECK 2件に `volatileId` が立つ
+  4. **DTOに絶対パス・`analysis`・`edits`・`technicalMessage` が含まれない**
+  5. **不正入力9種を拒否**：相対パス / 不正なマーカーID / パス断片のID / 空の名前 / 名前に改行 / 時刻の編集 / 種類の変更 / 古い `updatedAt` / 存在しないID
+  6. **★CHECK（volatile）をGUIから編集でき、`volatileId` が返る**（警告表示の根拠）
+  7. 再出力の実行工程が `['generate-premiere-xml', 'save-artifacts', 'save-project']`
+  8. **実行中の再出力を `PROJECT_ALREADY_RUNNING` で拒否**、`outcome: 'completed'` で完走
+  9. **GUIでの編集が XML に反映**（`comment='GUIから確認済み'`）。xmllint 妥当
+  10. **既存の字幕・ショート候補・カメラ切替の3画面がすべて壊れていない**
+  11. アプリ終了後に**孤児プロセス0件**
+
+  **元素材（wide.mp4 / cam_A.mp4 / mic_A.wav）のMD5は全工程の前後で完全一致**（読むだけ）。
 
 ---
 
@@ -695,6 +829,12 @@ Test Files  45 passed (45)
 - **【カメラ切替】`syncMode: 'common'` での時刻ずれ**：注意書きは出しているが、**実際に common モードで再出力してXML上の時刻を突き合わせた確認は未実施**。
 - **【カメラ切替】`reason` の暫定措置**：人が追加したカットに `'hold'` を使っている。**Premiereのクリップ名に `(hold)` と出ることの実運用上の見え方は未確認**。
 - **【カメラ切替】3台以上のカメラ**：`wide` / `cam_A` / `cam_B` の3台で確認。`cam_C` を含む4台以上での動作は未確認（`ASSET_ROLES` は `cam_C` まで定義済み）。
+- **【マーカー】画面上の操作**：データ層・IPC層はCDP経由で実アプリを操作して確認済みだが、**解析画面から「マーカーを確認」ボタンを押し、一覧をクリックして名前・コメントを打ち替える一連のUI操作は人手で未確認**（ファイル選択ダイアログがOSネイティブで自動化できないため）。状態遷移はリデューサのテスト41件で固定してある。
+- **【マーカー】Premiere でのマーカー表示**：再出力した FCP7 XML に `<marker>` が正しく並ぶことと `[KIND] ` 前置は確認したが、**実際に Premiere Pro で開いてマーカーパネルに意図どおり表示されるかは未検証**（Premiere実機検証がユーザー側で未実施のため）。
+- **【マーカー】マーカーが多数ある場合**：実素材のマーカーが5件だけだったため、数十〜数百件でのスクロール性能・種別絞り込みの体感は未計測。
+- **【マーカー】同一種別・同一時刻のID衝突**：`markerId` に連番が無いため理論上起こりうるが、**実データでは未発生**。検出と編集不可はテストで固定したが、実プロジェクトで再現した確認はしていない。
+- **【マーカー】未生成の種別**：実際に生成されるのは TOPIC / LAUGH / CHECK の3種だけ。KEY / SHORT / RETAKE / SPONSOR / OP / ED は型に定義があるだけで、**それらを含むプロジェクトでの動作は未確認**（DTO・検証・画面は9種すべて受けられるようにしてある）。
+- **【マーカー】`syncMode: 'common'` での区間外マーカーの除外**：注意書きは出しているが、**実際に common モードで再出力して除外を確認した検証は未実施**。
 - **【ショート候補】`edits.history` の肥大化**：1回の判断で最大7エントリ（6項目 + `candidateRange`）が追記される。候補が多く判断をやり直すほど `project.json` が膨らむが、**長期運用での実サイズは未計測**。履歴の間引き・圧縮は未実装。
 
 ---
@@ -717,7 +857,7 @@ Electron GUIの前提となる構成の整理を実施済み。**ロジックの
 解析の「選択 → 開始 → 進捗 → 中止 → 完了 → フォルダを開く」までを1画面で操作できる最小構成。**`packages/*` のロジックは一切変更していない**（変更は `apps/desktop/` の新規追加と、ルートの `package.json` スクリプトのみ）。
 
 - Main / Preload / Renderer / Shared DTO / 解析専用プロセス の5層に分離
-- `contextIsolation: true` / `nodeIntegration: false` / `sandbox: true`。Preloadは7つのAPIだけを公開（★Step 2時点の数。Step 3・Step 5の追加を経て現在は21個）
+- `contextIsolation: true` / `nodeIntegration: false` / `sandbox: true`。Preloadは7つのAPIだけを公開（★Step 2時点の数。Step 3〜8の追加を経て現在は36個）
 - 解析は `child_process.fork` の別プロセスで実行（メインプロセスを塞がない）
 - Rendererからの入力（パス・工程ID・同期モード・runId）をMain側で必ず検証
 - 二重実行防止はElectron層のみで実装（`run-pipeline.ts` は無変更）
@@ -790,13 +930,25 @@ Electron GUIの前提となる構成の整理を実施済み。**ロジックの
 
 コミット：`4fa9f8d feat: add camera shot review with timeline-safe editing`（29ファイル / +5748行 −214行）
 
+### 完了済み：Step 8 — 確認画面（マーカー）（2026-08-05）
+
+マーカーの名前・コメントの修正、削除、取り消しと、FCP7 XML の再出力まで。**`packages/*` は1ファイルも変更していない**。
+
+- **★IDの2系統を実測で確認**し、`volatileId`（CHECK系＝再解析で必ず外れる）を1件ずつ提示
+- **CHECK の編集は禁止しない**。「永続化されない可能性」を編集画面で個別に警告したうえで使えるようにした
+- **★種別またぎの再接続を検出**（章タイトルが笑いマーカーに乗る事故）。**自動では取り消さない**
+- 名前は空を拒否・コメントは空を許可（`resolve.ts` の `??` フォールバックに由来する区別）
+- 同一種別・同一時刻のID衝突は編集不可にする（字幕IDの重複と同じ扱い）
+- 再出力は3工程。カメラ切替と同じく `generate-premiere-xml` が必須
+- マーカーの追加・時刻/種別の変更は**データモデル上できない**ため未対応（検証で明示的に拒否）
+- テスト144件を追加
+
 ### 次の実装
 
-1. **孤立修正の再接続UI**（現在は一覧表示のみ。「この修正をこのキューに付け直す」操作はまだ無い）
-2. **確認画面 — マーカーの修正**（`edits.markers`。`Record` 構造で字幕に近く、4画面目としては軽い）
-3. **★共通化のリファクタリング**（下の「10. 今後のリファクタリング候補」。3画面が出そろい、共通項が確定した）
-4. 書き出し画面
-5. AI設定（ローカルモードで配線 → GeminiProvider）
+1. **★共通化のリファクタリング**（下の「10. 今後のリファクタリング候補」。**4画面が出そろい、共通項が確定した**。別フェーズ・別コミットで実施する方針）
+2. **孤立修正の再接続UI**（現在は一覧表示のみ。「この修正をこの要素に付け直す」操作はまだ無い。★4画面すべてで孤立が起こるので、共通の画面として作るのが自然）
+3. 書き出し画面
+4. AI設定（ローカルモードで配線 → GeminiProvider）
 
 ※「プロジェクト一覧・素材登録画面」はStep 5、「ショート候補の採否」はStep 6、「カメラ切替の修正」はStep 7で実装済み。
 
@@ -848,7 +1000,7 @@ npm install
 # 4. 型チェック（エラー0件が正常）
 npm run typecheck
 
-# 5. 全テスト（本ファイル更新時点で 45 files / 1228 tests / 全pass）
+# 5. 全テスト（本ファイル更新時点で 48 files / 1372 tests / 全pass）
 npm test
 
 # 6. ビルド（dist/ と apps/desktop/dist/ の生成。どちらも .gitignore 済み）
@@ -889,6 +1041,10 @@ npm run selfcheck
 - **Rendererに絶対パスやファイルアクセスを渡さないこと。** 再生用メディアは `contentos-media://<token>` のみ。トークンは Main が明示的に登録したパスにしか解決しない。
 - **ショート候補の再出力に `generate-premiere-xml` を足さないこと。** ショート候補は FCP7 XML に含まれないため動かす理由がなく、動かせば Premiere実機検証の対象である成果物を無用に作り直すことになる（`SHORTS_EXPORT_STEPS`）。
 - **`REANALYSIS_WARNING` / `FIELDS_NOT_EXPORTED` を Renderer 側のフラグで消せるようにしないこと。** どちらも実装で回避できない性質を編集者に知らせるもので、Main が本文を持ち DTO に必ず載せる設計になっている。
+- **マーカーの再出力から `generate-premiere-xml` を外さないこと。** カメラ切替と同じ理由（`save-artifacts` は `analysis.markers` の件数しか使わない）。
+- **CHECK マーカー（`volatileId`）の編集を禁止しないこと。** 一時的な確認メモとして使う運用を前提に、警告したうえで許可する方針を採っている。代わりに `volatileId` をDTOから外したり、画面の個別警告を消したりしないこと。
+- **種別またぎの再接続（`reattachedKindMismatch`）を自動で取り消さないこと。** 検出して提示するまでが役割で、判断は人が行う（ショートの `rangeChanged`・カメラの `reattached` と同じ思想）。
+- **マーカーIDの検証を時刻キー形式だけに狭めないこと。** CHECK は `mk-CHECK-<check.id>` という別系統で、実データでは過半を占める。狭めると大半のマーカーが編集できなくなる。
 - **カメラ切替の再出力から `generate-premiere-xml` を外さないこと。** カメラ修正が反映される成果物は FCP7 XML だけで、`save-artifacts` が書く SRT・CSV・レポートには一切出ない。外すと修正がどこにも反映されない（`CAMERA_EXPORT_STEPS`）。
 - **カメラ切替の検証層（`camera-validate.ts` / `camera.ts` の `assertTimelineSafe`）を緩めないこと。** `build-project.ts`（凍結対象）は未知の `cameraId` で例外を投げ、ゼロ長カットを黙って捨て、重なりを検査しない。この層が最後の砦になっている。
 - **`cameraId` を `asset.id` と取り違えないこと。** `generate-premiere-xml.ts` が `videos` を `{ id: a.role }` で組み立てているため、実体は **role**（`wide` / `cam_A`）。
@@ -899,13 +1055,44 @@ npm run selfcheck
 
 ## 10. 今後のリファクタリング候補（★実装しないこと。着手判断は都度ユーザーに確認する）
 
-Step 7 完了時点（2026-08-05）の状況。**3画面が出そろい、共通項が確定した。**
+Step 8 完了時点（2026-08-05）の状況。**★4画面（字幕・ショート・カメラ・マーカー）が出そろい、共通項が確定した。次フェーズで実施する。**
+
+### ★共通化フェーズ（Step 9）の進め方 — 着手前に必ず読むこと
+
+**1. 共通化は Step 9 として独立したコミットで実施する。**
+Step 1〜8 のように「機能を作るついでに整理する」形にはしない。共通化だけを行うコミットを切る。
+
+**2. ★機能追加と共通化を同じコミットに混ぜない。**
+理由：混ぜると回帰が起きたときに「新機能の実装が原因か、共通化が原因か」を切り分けられなくなる。特にカメラ切替とマーカーは FCP7 XML を書き換えるため、壊れたときの影響が Premiere プロジェクトそのものに及ぶ。共通化のコミットでは**テスト件数と全pass、および4画面すべての実機確認が Step 8 時点と同じ結果になること**を条件とする（＝挙動を1つも変えない）。
+
+**3. ★`persistAndReload` は2系統に分ける方針を維持する。**
+
+| 系統 | 画面 | 戻り値 | 理由 |
+|---|---|---|---|
+| **1要素返却** | Subtitle / Shorts / **Marker** | 更新した1件 | 要素同士が干渉しない |
+| **並び全体返却** | **Camera** | 並び全体 | 追加・削除・時間変更が隣の要素の重なり・隙間を変えるため、1件だけ返すと画面の整合性表示が古いままになる |
+
+3対1なので、**1要素返却型を共通基盤にし、Camera だけ別実装として残す**。無理に1つへまとめないこと。まとめると Camera の都合（並び全体・重なり検査）が共通基盤に流れ込み、他の3画面が持つ必要のない複雑さを背負う。
+
+この2系統の区別は Camera 実装時点では見えておらず、**Marker を作って初めて確定した**。Step 9 ではこの分割を前提に設計する。
+
+
 
 **進捗：優先度Aのうち「validate の依存方向」は Step 7 の最初に解消済み。**
 `validate-common.ts` を新設し、`invalid()` / `CONTROL_CHARS` / `validateExpectedUpdatedAt` / `validateTimeSec` / `validateSingleLineText` / `validateMultiLineText` / `conflictError()` を集約した。字幕・ショート・カメラ・素材登録のすべてがここを見る。**挙動は無変更**（テストも `validate-common.test.ts` へ移設しただけで件数は1048のまま維持）。`review-validate.ts` は字幕固有の検証だけを持つ状態になった。
 
-**残りは未実施。** Step 7 では設計を固定するため、他の共通化はあえて行っていない。
-★カメラは字幕・ショートと同型ではなかった（要素の追加・削除・時間軸・要素間の相互作用を持ち、保存結果が「1要素」ではなく「並び全体」）。そのため下表の `persistAndReload` などは**そのままでは共通化できない**。マーカーReview（4画面目・`Record` 構造で字幕に近い）の着手前が次の判断ポイント。
+**残りは未実施。** Step 7・8 では設計を固定するため、他の共通化はあえて行っていない。
+
+★4画面を並べて分かった最重要の事実：**`persistAndReload` は「1要素を返す」型と「並び全体を返す」型に分かれる。**
+
+| 画面 | 保存結果 | 理由 |
+|---|---|---|
+| 字幕 / ショート / **マーカー** | **1要素** | 要素同士が干渉しない |
+| カメラ切替 | **並び全体** | 追加・削除・時間変更が隣の要素の重なり・隙間を変える |
+
+**3対1なので、前者を共通基盤にしてカメラだけ別実装**にするのが素直。これは Camera 実装時には見えていなかった情報で、Marker を作って初めて確定した。
+
+もう1つ確定したこと：`summaryOf` / `loadProject` の try/catch / 競合検出は**4画面すべてで同型**。カメラの `loadForSave()`（マーカーでも同じ形を採用）が良い前例になっている。
 
 ### 優先度A：依存の向きと命名（3画面目の前に直す価値が高い）
 
@@ -914,8 +1101,9 @@ Step 7 完了時点（2026-08-05）の状況。**3画面が出そろい、共通
 | ~~validate の依存方向~~ | ✅ **Step 7 で解消済み**（`validate-common.ts`） | — | — |
 | `main/review.ts` | 実体は**字幕Review専用**なのに総称的な名前。しかも `shorts.ts` と `camera.ts` が型と `normalizeAnalysis` をここから import している | 「ショート・カメラが字幕に依存している」ように読める | `subtitle-review.ts` へ改名し、共有部分を `review-common.ts` へ抜く |
 | `ReviewDeps` | 字幕・ショート・カメラ共通の依存になったが名前は Review のまま | 4画面目で更に実態とずれる | `ProjectEditDeps` 等 |
-| `countsOf` | `review.ts`（private）・`shorts.ts`（export）・`camera.ts`（export）に**同名で別シグネチャが3つ** | まとめるとき衝突する | 共通化 or 改名 |
-| `EditsLike` の必須フィールド | 画面が増えるたびに `subtitles` → `+shorts` → `+cameraShots` と必須項目が増える | fixture もそのたび更新が要る | 最小契約にして各画面が narrow する |
+| `countsOf` | `review.ts`（private）・`shorts.ts`・`camera.ts`・`marker.ts` に**同名で別シグネチャが4つ** | まとめるとき衝突する | 共通化 or 改名 |
+| `EditsLike` の必須フィールド | 画面が増えるたびに `subtitles` → `+shorts` → `+cameraShots` → `+markers` と必須項目が増える | fixture もそのたび更新が要る | 最小契約にして各画面が narrow する |
+| `main/review.ts` からの型import | `shorts.ts` / `camera.ts` / `marker.ts` の**3つ**が依存している | 依存の向きが実態と食い違う | `review-common.ts` へ抜く |
 
 ### 優先度B：層ごとの重複（実測値）
 
@@ -923,11 +1111,11 @@ Step 7 完了時点（2026-08-05）の状況。**3画面が出そろい、共通
 
 | 対象 | 重複の程度 | 2画面 → 4画面 |
 |---|---|---|
-| `summaryOf()` | **3ファイルで書式以外バイト一致** | 12行 ×3 |
-| `persistAndReload()` | 字幕・ショートは構造一致。★**カメラだけ戻り値が「並び全体」で異なる**ため、単純な共通化は不可 | 35行 ×3（要設計） |
-| `loadProject` の try/catch → `INVALID_PROJECT` | 字幕3・ショート3・カメラ1（`loadForSave` に集約済み） | 7箇所 |
-| 競合検出 `updatedAt !== expectedUpdatedAt` | 字幕2・ショート2・カメラ1（`loadForSave` に集約済み） | 5箇所。★カメラの `loadForSave` が良い前例 |
-| `toOrphaned()` | `kind` で filter して edit の中身を写す形が同一。差は「どのフィールドを写すか」だけ | 20行 ×3 |
+| `summaryOf()` | **4ファイルで書式以外バイト一致** | 12行 ×4 |
+| `persistAndReload()` | ★**3対1に分かれる**（字幕・ショート・マーカー＝1要素／カメラ＝並び全体）。前者を共通化しカメラは別実装が素直 | 35行 ×4（要設計） |
+| `loadProject` の try/catch → `INVALID_PROJECT` | 字幕3・ショート3・カメラ1・マーカー1（後2つは `loadForSave` に集約済み） | 8箇所 |
+| 競合検出 `updatedAt !== expectedUpdatedAt` | 字幕2・ショート2・カメラ1・マーカー1 | 6箇所。★`loadForSave` が良い前例 |
+| `toOrphaned()` | `kind` で filter して edit の中身を写す形が同一。差は「どのフィールドを写すか」だけ | 20行 ×4 |
 | `normalizeAnalysis()` | **既に共有済み**（`review.ts` から export）。良い前例 | — |
 
 **IPC**

@@ -90,6 +90,23 @@ export interface CameraEditsLike {
   deletedIds: string[];
 }
 
+/** `@contentos/core` の `IdentifiedMarker`。 */
+export interface AnalysisMarkerLike {
+  id: string;
+  kind: string;
+  startSec: number;
+  endSec?: number;
+  name: string;
+  comment: string;
+}
+
+/** `@contentos/core` の `EditsLayer['markers']` の値。 */
+export interface MarkerEditLike {
+  name?: string;
+  comment?: string;
+  deleted?: boolean;
+}
+
 export interface EditHistoryEntryLike {
   at: string;
   actor: string;
@@ -106,6 +123,8 @@ export interface EditsLike {
   shorts: Record<string, ShortDecisionLike>;
   /** カメラ切替の変更・追加・削除。★Step 7 で使う。 */
   cameraShots: CameraEditsLike;
+  /** マーカーの修正・削除。★Step 8 で使う。 */
+  markers: Record<string, MarkerEditLike>;
   history: EditHistoryEntryLike[];
   [key: string]: unknown;
 }
@@ -124,6 +143,8 @@ export interface ProjectLike {
     shortCandidates?: AnalysisShortCandidateLike[];
     /** ★Step 7（カメラ切替Review）で使う。解析前・旧形式では欠けうる。 */
     cameraShots?: AnalysisCameraShotLike[];
+    /** ★Step 8（マーカーReview）で使う。解析前・旧形式では欠けうる。 */
+    markers?: AnalysisMarkerLike[];
   };
   edits: EditsLike;
   [key: string]: unknown;
@@ -163,6 +184,10 @@ export interface ReattachedEditLike {
   deltaSec: number;
 }
 
+export interface ResolvedMarkerLike extends AnalysisMarkerLike {
+  edited: boolean;
+}
+
 export interface ResolveResultLike {
   resolved: {
     subtitles: ResolvedSubtitleLike[];
@@ -170,6 +195,8 @@ export interface ResolveResultLike {
     shorts?: ResolvedShortLike[];
     /** ★Step 7 で使う。resolveProject は常に返す。 */
     cameraShots?: ResolvedCameraShotLike[];
+    /** ★Step 8 で使う。resolveProject は常に返す。 */
+    markers?: ResolvedMarkerLike[];
   };
   orphaned: {
     kind: string;
@@ -192,6 +219,7 @@ export interface ReviewDeps {
       subtitles: AnalysisSubtitleLike[];
       shortCandidates?: AnalysisShortCandidateLike[];
       cameraShots?: AnalysisCameraShotLike[];
+      markers?: AnalysisMarkerLike[];
     },
     edits: EditsLike,
   ): ResolveResultLike;
@@ -200,7 +228,7 @@ export interface ReviewDeps {
     edits: EditsLike,
     entry: {
       /** ★`EditHistoryEntry.kind`（packages/core）の一部。増やすときは本体と揃える。 */
-      kind: 'subtitle' | 'short' | 'cameraShot';
+      kind: 'subtitle' | 'short' | 'cameraShot' | 'marker';
       targetId: string;
       field: string;
       before: unknown;
@@ -419,6 +447,7 @@ export function normalizeAnalysis(analysis: {
   subtitles: AnalysisSubtitleLike[];
   shortCandidates: AnalysisShortCandidateLike[];
   cameraShots: AnalysisCameraShotLike[];
+  markers: AnalysisMarkerLike[];
 } {
   const filled: Record<string, unknown> = { ...analysis };
   for (const key of ['cameraShots', 'chapters', 'markers', 'shortCandidates']) {
@@ -428,6 +457,7 @@ export function normalizeAnalysis(analysis: {
     subtitles: AnalysisSubtitleLike[];
     shortCandidates: AnalysisShortCandidateLike[];
     cameraShots: AnalysisCameraShotLike[];
+    markers: AnalysisMarkerLike[];
   };
 }
 

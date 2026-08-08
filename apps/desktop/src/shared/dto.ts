@@ -24,6 +24,15 @@ import type {
   UpdateAssetRequest,
 } from './setup-dto.ts';
 import type {
+  DeleteMarkerRequest,
+  MarkerExportRequest,
+  MarkerExportResult,
+  MarkerLoadResult,
+  RemoveMarkerEditRequest,
+  SaveMarkerEditResult,
+  UpdateMarkerRequest,
+} from './marker-dto.ts';
+import type {
   CameraExportRequest,
   CameraExportResult,
   CameraLoadResult,
@@ -210,6 +219,16 @@ export interface ContentOsDesktopApi {
   cameraDeleteShot(request: DeleteCameraShotRequest): Promise<SaveCameraEditResult>;
   cameraRemoveEdit(request: RemoveCameraEditRequest): Promise<SaveCameraEditResult>;
   cameraExport(request: CameraExportRequest): Promise<CameraExportResult>;
+
+  /**
+   * マーカーの確認・修正。
+   * ★再出力は3工程。マーカー修正も FCP7 XML にしか出ない。
+   */
+  markerLoad(projectPath: string): Promise<MarkerLoadResult>;
+  markerUpdate(request: UpdateMarkerRequest): Promise<SaveMarkerEditResult>;
+  markerDelete(request: DeleteMarkerRequest): Promise<SaveMarkerEditResult>;
+  markerRemoveEdit(request: RemoveMarkerEditRequest): Promise<SaveMarkerEditResult>;
+  markerExport(request: MarkerExportRequest): Promise<MarkerExportResult>;
 
   /** プロジェクト一覧・新規作成・素材登録。 */
   listProjects(): Promise<ProjectListResult>;

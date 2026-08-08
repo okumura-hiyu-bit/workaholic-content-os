@@ -11,6 +11,7 @@ import { recordEdit, resolveProject } from '@contentos/core/resolve';
 
 import type {
   AnalysisCameraShotLike,
+  AnalysisMarkerLike,
   AnalysisShortCandidateLike,
   AnalysisSubtitleLike,
   EditsLike,
@@ -104,6 +105,31 @@ export function cameraShotFixture(
   };
 }
 
+/**
+ * マーカーのfixture。
+ *
+ * ★実データには2系統のIDがある（`generate-markers.ts` を確認）。
+ *   時刻キー : markerId(kind, startSec) → mk-TOPIC-00000000
+ *   任意     : mk-CHECK-${check.id}     → mk-CHECK-check-lowconf-7700
+ * どちらも実プロジェクトから採取した形そのままで作る
+ * （推測で書くと、テストだけが通る状態になるため）。
+ */
+export function markerFixture(
+  kind: string,
+  startSec: number,
+  name: string,
+  comment: string,
+  options: { endSec?: number; checkId?: string } = {},
+): AnalysisMarkerLike {
+  const id =
+    options.checkId !== undefined
+      ? `mk-${kind}-${options.checkId}`
+      : `mk-${kind}-${String(Math.round(startSec * 1000)).padStart(8, '0')}`;
+  const marker: AnalysisMarkerLike = { id, kind, startSec, name, comment };
+  if (options.endSec !== undefined) marker.endSec = options.endSec;
+  return marker;
+}
+
 export function projectFixture(
   overrides: Partial<ProjectLike> = {},
 ): ProjectLike {
@@ -167,6 +193,16 @@ export function projectFixture(
         cameraShotFixture(0, 10, 'wide'),
         cameraShotFixture(10, 25, 'cam_A', 'speech'),
         cameraShotFixture(25, 40, 'cam_B', 'reaction'),
+      ],
+      markers: [
+        markerFixture('TOPIC', 0, 'オープニング', '章タイトル（AIアシストモードで改善できます）'),
+        // ★実データから採取した CHECK マーカーの形。timeFromId が undefined を返す。
+        markerFixture('CHECK', 7.7, '要確認', '低confidence: 「話者B」（聞き直しを推奨）', {
+          checkId: 'check-lowconf-7700',
+        }),
+        markerFixture('LAUGH', 33.99, '笑い（2.0秒）', '関与: A, B / 確信度 0.616', {
+          endSec: 36.01,
+        }),
       ],
       shortCandidates: [
         shortCandidateFixture(1, 2, 32, {
