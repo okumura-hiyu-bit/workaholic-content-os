@@ -2,8 +2,8 @@
 
 > 作成日: 2026-07-30 / 最終更新: 2026-08-05（Step 1「土台整理」、Step 2「Electron骨組み + IPC」、Step 3「確認画面：字幕」、Step 4「字幕ID重複の解消」、Step 5「プロジェクト一覧・新規作成・素材登録」、Step 6「確認画面：ショート候補」、Step 7「確認画面：カメラ切替」、Step 8「確認画面：マーカー」を反映）。この内容は会話の要約ではなく、**実際のリポジトリ・テスト結果・型チェック結果を根拠に**作成しています。数値は必ず次回セッション側でも再確認してください（本ファイル末尾のコマンド）。
 >
-> **Step 1〜7はコミット済み**（`4fa9f8d` / doc `89830b9`）。**Step 8 は未コミット**（ワーキングツリーにあります）。
-> リポジトリはブランチ `main`、リモート `origin`（https://github.com/okumura-hiyu-bit/workaholic-content-os）。
+> **Step 1〜8はすべてコミット済み**（最新: `040822c`）。ワーキングツリーに未コミットの実装は残っていません。
+> リポジトリはブランチ `main`、リモート `origin`（https://github.com/okumura-hiyu-bit/workaholic-content-os）へpush済みです。
 > テストは **48ファイル / 1372件** 全pass、型チェック エラー0件、ビルド成功。
 
 ---
@@ -943,6 +943,8 @@ Electron GUIの前提となる構成の整理を実施済み。**ロジックの
 - マーカーの追加・時刻/種別の変更は**データモデル上できない**ため未対応（検証で明示的に拒否）
 - テスト144件を追加
 
+コミット：`040822c feat: add marker review with volatile-id and kind-mismatch detection`（21ファイル / +4379行 −37行）
+
 ### 次の実装
 
 1. **★共通化のリファクタリング**（下の「10. 今後のリファクタリング候補」。**4画面が出そろい、共通項が確定した**。別フェーズ・別コミットで実施する方針）
@@ -980,6 +982,8 @@ git status
 git log --oneline -5
 git diff --stat
 # → 2026-08-05 時点の最新コミット（新しい順）：
+#   040822c feat: add marker review with volatile-id and kind-mismatch detection ← Step 8
+#   89830b9 docs: record Step 7 commit id
 #   4fa9f8d feat: add camera shot review with timeline-safe editing  ← Step 7
 #   93a3066 docs: record Step 6 design decisions and refactoring candidates
 #   7e37d07 feat: add short candidate review and adoption workflow    ← Step 6
