@@ -15,6 +15,7 @@
  */
 
 import type { ProjectSummary, SafePipelineError } from './dto.ts';
+import type { ReviewExportRequest, ReviewExportResult, ReviewMedia } from './review-dto.ts';
 
 // ─── 読み込み ──────────────────────────────────────────
 
@@ -97,12 +98,8 @@ export interface ShortsData {
   candidates: ShortCandidateItem[];
   counts: ShortsCounts;
   orphaned: ShortsOrphanedDecision[];
-  /** 再生用プレビュー。字幕Reviewと同じものを使い回す。 */
-  media?: {
-    url: string;
-    durationSec: number;
-    sourceFileName: string;
-  };
+  /** 再生用プレビュー。★4画面で同じ型（`review-dto.ts` の `ReviewMedia`）。 */
+  media?: ReviewMedia;
   /**
    * ★常時表示する警告。ショートIDが時刻を持たないことに由来する仕様。
    * 画面から消せないようにするため、フラグではなく本文をMainが持つ。
@@ -171,15 +168,15 @@ export type SaveShortDecisionResult =
 
 // ─── 再出力 ────────────────────────────────────────────
 
-export interface ShortsExportRequest {
-  projectPath: string;
-}
+/**
+ * 再出力のリクエスト。★4画面で同じ形なので `ReviewExportRequest` を使う
+ * （画面ごとの別名として残すのは、呼び出し側の読みやすさのため）。
+ */
+export type ShortsExportRequest = ReviewExportRequest;
 
 /**
  * 再出力は既存の部分実行に乗せる。
  * ★どの工程を動かすかは Main が固定する（Renderer に選ばせない）。
  * ★FCP7 XML（generate-premiere-xml）は動かさない。
  */
-export type ShortsExportResult =
-  | { ok: true; runId: string; steps: string[] }
-  | { ok: false; error: SafePipelineError };
+export type ShortsExportResult = ReviewExportResult;

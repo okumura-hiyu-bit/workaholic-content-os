@@ -261,6 +261,55 @@ export interface IpcHandlers {
 
 export function createIpcHandlers(deps: IpcDeps): IpcHandlers {
   /**
+   * 再出力ハンドラを作る。★4画面で工程定数以外は完全に同じだった。
+   *
+   * 共通なのは「パスを検証 → 有効なプロジェクトか確認 → projectRoot を解決 →
+   * 実行環境を事前チェック → runManager に投げる」まで。
+   * ★どの工程を動かすかは Main が固定し、Renderer に選ばせない。
+   * ★`force` は4画面とも必須。キャッシュキーが素材と設定から作られ
+   *   `project.edits` を含まないため、付けないと「変更なし」でスキップされ
+   *   人間の修正が成果物に出ない。
+   */
+  function createExportHandler(
+    steps: StepId[],
+  ): (rawRequest: unknown) => Promise<ReviewExportResult> {
+    return async (rawRequest: unknown) => {
+      const path = validateProjectPath(
+        (rawRequest as { projectPath?: unknown } | null)?.projectPath,
+      );
+      if (!path.ok) return { ok: false, error: path.error };
+
+      const summary = readProjectSummary(path.value, deps);
+      if (!summary.ok) return { ok: false, error: summary.error };
+
+      const root = deps.resolveRoot();
+      if (!root.ok) return { ok: false, error: root.error };
+
+      const pre = deps.preflight(root.projectRoot);
+      if (!pre.ok) {
+        return {
+          ok: false,
+          error:
+            pre.error ??
+            safeError(
+              DESKTOP_ERROR_CODES.ENVIRONMENT_NOT_READY,
+              '再出力に必要な環境が整っていません。',
+            ),
+        };
+      }
+
+      const started = deps.runManager.start({
+        projectPath: summary.summary.projectPath,
+        projectId: summary.summary.projectId,
+        projectRoot: root.projectRoot,
+        options: { onlySteps: steps, force: true },
+      });
+      if (!started.ok) return { ok: false, error: started.error };
+      return { ok: true, runId: started.runId, steps: [...steps] };
+    };
+  }
+
+  /**
    * カメラ操作の共通前処理。
    *
    * ★「そのプロジェクトに実在する映像素材の role」を集めてから検証する。
@@ -416,44 +465,7 @@ export function createIpcHandlers(deps: IpcDeps): IpcHandlers {
       return removeSubtitleEdit(validated.value, deps.review);
     },
 
-    async reviewExport(rawRequest) {
-      const path = validateProjectPath(
-        (rawRequest as { projectPath?: unknown } | null)?.projectPath,
-      );
-      if (!path.ok) return { ok: false, error: path.error };
-
-      const summary = readProjectSummary(path.value, deps);
-      if (!summary.ok) return { ok: false, error: summary.error };
-
-      const root = deps.resolveRoot();
-      if (!root.ok) return { ok: false, error: root.error };
-
-      const pre = deps.preflight(root.projectRoot);
-      if (!pre.ok) {
-        return {
-          ok: false,
-          error:
-            pre.error ??
-            safeError(
-              DESKTOP_ERROR_CODES.ENVIRONMENT_NOT_READY,
-              '再出力に必要な環境が整っていません。',
-            ),
-        };
-      }
-
-      // ★工程はMainが固定する。排他・進捗は解析と同じ仕組みに乗せる。
-      const started = deps.runManager.start({
-        projectPath: summary.summary.projectPath,
-        projectId: summary.summary.projectId,
-        projectRoot: root.projectRoot,
-        options: {
-          onlySteps: REVIEW_EXPORT_STEPS,
-          force: true,
-        },
-      });
-      if (!started.ok) return { ok: false, error: started.error };
-      return { ok: true, runId: started.runId, steps: [...REVIEW_EXPORT_STEPS] };
-    },
+    reviewExport: createExportHandler(REVIEW_EXPORT_STEPS),
 
     async reviewOpenMedia(rawPath) {
       const path = validateProjectPath(rawPath);
@@ -497,47 +509,7 @@ export function createIpcHandlers(deps: IpcDeps): IpcHandlers {
       );
     },
 
-    async shortsExport(rawRequest) {
-      const path = validateProjectPath(
-        (rawRequest as { projectPath?: unknown } | null)?.projectPath,
-      );
-      if (!path.ok) return { ok: false, error: path.error };
-
-      const summary = readProjectSummary(path.value, deps);
-      if (!summary.ok) return { ok: false, error: summary.error };
-
-      const root = deps.resolveRoot();
-      if (!root.ok) return { ok: false, error: root.error };
-
-      const pre = deps.preflight(root.projectRoot);
-      if (!pre.ok) {
-        return {
-          ok: false,
-          error:
-            pre.error ??
-            safeError(
-              DESKTOP_ERROR_CODES.ENVIRONMENT_NOT_READY,
-              '再出力に必要な環境が整っていません。',
-            ),
-        };
-      }
-
-      // ★工程はMainが固定する。排他・進捗は解析と同じ仕組みに乗せる。
-      // ★force が要るのは、キャッシュキーが素材と設定から作られ
-      //   project.edits を含まないため。付けないと「変更なし」でスキップされ、
-      //   採否が shorts.csv に出ない。
-      const started = deps.runManager.start({
-        projectPath: summary.summary.projectPath,
-        projectId: summary.summary.projectId,
-        projectRoot: root.projectRoot,
-        options: {
-          onlySteps: SHORTS_EXPORT_STEPS,
-          force: true,
-        },
-      });
-      if (!started.ok) return { ok: false, error: started.error };
-      return { ok: true, runId: started.runId, steps: [...SHORTS_EXPORT_STEPS] };
-    },
+    shortsExport: createExportHandler(SHORTS_EXPORT_STEPS),
 
     // ─── カメラ切替の確認・修正 ───────────────────────────
 
@@ -599,47 +571,7 @@ export function createIpcHandlers(deps: IpcDeps): IpcHandlers {
       );
     },
 
-    async cameraExport(rawRequest) {
-      const path = validateProjectPath(
-        (rawRequest as { projectPath?: unknown } | null)?.projectPath,
-      );
-      if (!path.ok) return { ok: false, error: path.error };
-
-      const summary = readProjectSummary(path.value, deps);
-      if (!summary.ok) return { ok: false, error: summary.error };
-
-      const root = deps.resolveRoot();
-      if (!root.ok) return { ok: false, error: root.error };
-
-      const pre = deps.preflight(root.projectRoot);
-      if (!pre.ok) {
-        return {
-          ok: false,
-          error:
-            pre.error ??
-            safeError(
-              DESKTOP_ERROR_CODES.ENVIRONMENT_NOT_READY,
-              '再出力に必要な環境が整っていません。',
-            ),
-        };
-      }
-
-      // ★工程はMainが固定する。排他・進捗は解析と同じ仕組みに乗せる。
-      // ★force が要るのは、キャッシュキーが素材と設定から作られ
-      //   project.edits を含まないため。付けないと「変更なし」でスキップされ、
-      //   カメラ修正が FCP7 XML に出ない。
-      const started = deps.runManager.start({
-        projectPath: summary.summary.projectPath,
-        projectId: summary.summary.projectId,
-        projectRoot: root.projectRoot,
-        options: {
-          onlySteps: CAMERA_EXPORT_STEPS,
-          force: true,
-        },
-      });
-      if (!started.ok) return { ok: false, error: started.error };
-      return { ok: true, runId: started.runId, steps: [...CAMERA_EXPORT_STEPS] };
-    },
+    cameraExport: createExportHandler(CAMERA_EXPORT_STEPS),
 
     // ─── マーカーの確認・修正 ─────────────────────────────
 
@@ -684,46 +616,7 @@ export function createIpcHandlers(deps: IpcDeps): IpcHandlers {
       );
     },
 
-    async markerExport(rawRequest) {
-      const path = validateProjectPath(
-        (rawRequest as { projectPath?: unknown } | null)?.projectPath,
-      );
-      if (!path.ok) return { ok: false, error: path.error };
-
-      const summary = readProjectSummary(path.value, deps);
-      if (!summary.ok) return { ok: false, error: summary.error };
-
-      const root = deps.resolveRoot();
-      if (!root.ok) return { ok: false, error: root.error };
-
-      const pre = deps.preflight(root.projectRoot);
-      if (!pre.ok) {
-        return {
-          ok: false,
-          error:
-            pre.error ??
-            safeError(
-              DESKTOP_ERROR_CODES.ENVIRONMENT_NOT_READY,
-              '再出力に必要な環境が整っていません。',
-            ),
-        };
-      }
-
-      // ★工程はMainが固定する。排他・進捗は解析と同じ仕組みに乗せる。
-      // ★force が要るのは、キャッシュキーが素材と設定から作られ
-      //   project.edits を含まないため。
-      const started = deps.runManager.start({
-        projectPath: summary.summary.projectPath,
-        projectId: summary.summary.projectId,
-        projectRoot: root.projectRoot,
-        options: {
-          onlySteps: MARKER_EXPORT_STEPS,
-          force: true,
-        },
-      });
-      if (!started.ok) return { ok: false, error: started.error };
-      return { ok: true, runId: started.runId, steps: [...MARKER_EXPORT_STEPS] };
-    },
+    markerExport: createExportHandler(MARKER_EXPORT_STEPS),
 
     // ─── プロジェクト一覧・新規作成・素材登録 ─────────────
 

@@ -10,6 +10,12 @@
  */
 
 import type { SafePipelineError } from '../shared/dto.ts';
+import {
+  canExportBase,
+  isSavablePhase,
+  type ReviewPhaseBase,
+  type ReviewStateBase,
+} from './review-shared.tsx';
 import type {
   ReviewCounts,
   ReviewData,
@@ -17,35 +23,20 @@ import type {
   SubtitleEditPatch,
 } from '../shared/review-dto.ts';
 
-export type ReviewPhase =
-  | 'loading'
-  | 'ready'
-  | 'dirty'
-  | 'saving'
-  | 'saved'
-  | 'conflict'
-  | 'export-running'
-  | 'export-complete'
-  | 'failed';
+/** ★4画面共通（`review-shared.tsx` の `ReviewPhaseBase`）。名前だけ画面側に残す。 */
+export type ReviewPhase = ReviewPhaseBase;
 
-export interface ReviewState {
-  phase: ReviewPhase;
+/**
+ * ★共通フィールド（phase / updatedAt / dirty / exportRunId / playheadSec /
+ * error / lastSavedAt）は `ReviewStateBase` から継承する。
+ * ここに書くのは字幕Review固有のものだけ。
+ */
+export interface ReviewState extends ReviewStateBase {
   data?: ReviewData;
-  /** 競合更新の検出に使う。保存のたびに更新する。 */
-  updatedAt?: string;
   /** 選択中の字幕（IDではなく位置で持つ。IDが重複しうるため）。 */
   selectedIndex?: number;
   /** 編集中の下書き。保存前の値。 */
   draft?: { index: number; text: string; speakerId?: string };
-  /** 未保存の変更があるか。 */
-  dirty: boolean;
-  /** 再出力の実行ID。 */
-  exportRunId?: string;
-  /** 再生位置（秒）。 */
-  playheadSec: number;
-  error?: SafePipelineError;
-  /** 直近の保存が成功したことを一時的に示す。 */
-  lastSavedAt?: string;
 }
 
 export type ReviewAction =
@@ -71,26 +62,15 @@ export const initialReviewState: ReviewState = {
 
 /** 保存できる状態か。★連打・二重保存を止める唯一の判定。 */
 export function canSave(state: ReviewState): boolean {
-  return (
-    state.dirty &&
-    state.draft !== undefined &&
-    state.phase !== 'saving' &&
-    state.phase !== 'conflict' &&
-    state.phase !== 'export-running' &&
-    state.phase !== 'loading'
-  );
+  return state.dirty && state.draft !== undefined && isSavablePhase(state);
 }
 
-/** 再出力を始められるか。★実行中の再実行を止める。 */
+/**
+ * 再出力を始められるか。★実行中の再実行を止める。
+ * 判定は4画面共通（`review-shared.tsx` の `canExportBase`）。
+ */
 export function canExport(state: ReviewState): boolean {
-  return (
-    state.data !== undefined &&
-    !state.dirty &&
-    state.phase !== 'saving' &&
-    state.phase !== 'export-running' &&
-    state.phase !== 'conflict' &&
-    state.phase !== 'loading'
-  );
+  return canExportBase(state);
 }
 
 /** 編集できるキューか。IDが重複しているものは触らせない。 */

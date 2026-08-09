@@ -18,6 +18,7 @@ import type { Validated } from './validate.ts';
 import { validateProjectPath } from './validate.ts';
 import {
   CONTROL_CHARS,
+  createIdValidator,
   invalid,
   validateExpectedUpdatedAt,
   validateMultiLineText,
@@ -48,15 +49,7 @@ export const MAX_SHORT_HASHTAG_LENGTH = 50;
  */
 const SHORT_ID = /^short_[0-9]{2,4}$/;
 
-export function validateShortId(value: unknown): Validated<string> {
-  if (typeof value !== 'string' || value.length === 0) {
-    return invalid('ショート候補IDが指定されていません。');
-  }
-  if (!SHORT_ID.test(value)) {
-    return invalid('ショート候補IDの形式が不正です。');
-  }
-  return { ok: true, value };
-}
+export const validateShortId = createIdValidator(SHORT_ID, 'ショート候補ID');
 
 /**
  * ハッシュタグの検証。

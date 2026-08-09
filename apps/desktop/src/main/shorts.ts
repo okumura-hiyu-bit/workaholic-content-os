@@ -17,7 +17,7 @@
  * これは直せない前提なので、画面に常時警告を出す（REANALYSIS_WARNING）。
  */
 
-import type { ProjectSummary, SafePipelineError } from '../shared/dto.ts';
+import type { SafePipelineError } from '../shared/dto.ts';
 import { DESKTOP_ERROR_CODES, safeError } from '../shared/errors.ts';
 import type {
   SaveShortDecisionResult,
@@ -31,6 +31,13 @@ import type {
 } from '../shared/shorts-dto.ts';
 import type { ReviewMedia } from '../shared/review-dto.ts';
 import { conflictError } from '../shared/validate-common.ts';
+import {
+  analysisNotReadyError,
+  loadProjectOrError,
+  SAVE_FAILED_DECISION,
+  saveAndRebuild,
+  summaryOf,
+} from './review-common.ts';
 import type {
   AnalysisShortCandidateLike,
   EditsLike,
@@ -202,24 +209,6 @@ function toOrphaned(
     });
 }
 
-function summaryOf(
-  project: ProjectLike,
-  projectDir: string,
-  notes: string[],
-): ProjectSummary {
-  const summary: ProjectSummary = {
-    projectPath: projectDir,
-    projectId: project.id,
-    name: project.name,
-    status: project.status,
-    assetCount: Array.isArray(project.assets) ? project.assets.length : 0,
-    updatedAt: project.updatedAt,
-    notes,
-  };
-  if (project.recordedAt !== undefined) summary.recordedAt = project.recordedAt;
-  return summary;
-}
-
 export function countsOf(
   candidates: readonly ShortCandidateItem[],
   orphaned: readonly unknown[],
@@ -235,40 +224,18 @@ export function countsOf(
   };
 }
 
-function analysisNotReady(): SafePipelineError {
-  return safeError(
-    DESKTOP_ERROR_CODES.ANALYSIS_NOT_READY,
-    'このプロジェクトはまだ解析されていません。',
-    {
-      recoverable: true,
-      suggestedAction: '先に「解析開始」を実行してください。',
-    },
-  );
-}
-
 /** ショート候補の確認に必要な情報だけを組み立てる。★Project全体は返さない。 */
 export function buildShortsData(
   projectDir: string,
   deps: ReviewDeps,
 ): ShortsLoadResult {
-  let loaded: { project: ProjectLike; notes?: string[] };
-  try {
-    loaded = deps.loadProject(projectDir);
-  } catch {
-    return {
-      ok: false,
-      error: safeError(
-        DESKTOP_ERROR_CODES.INVALID_PROJECT,
-        'project.json を読み込めませんでした。',
-        { recoverable: true },
-      ),
-    };
-  }
+  const loaded = loadProjectOrError(projectDir, deps);
+  if (!loaded.ok) return { ok: false, error: loaded.error };
 
-  const project = loaded.project;
+  const project = loaded.value.project;
   const analysis = project.analysis;
   if (analysis === undefined || !Array.isArray(analysis.subtitles)) {
-    return { ok: false, error: analysisNotReady() };
+    return { ok: false, error: analysisNotReadyError() };
   }
 
   // ★表示値は resolveProject に作らせる（独自の突き合わせをしない）。
@@ -288,7 +255,7 @@ export function buildShortsData(
   }));
 
   const data: ShortsData = {
-    summary: summaryOf(project, projectDir, loaded.notes ?? []),
+    summary: summaryOf(project, projectDir, loaded.value.notes ?? []),
     updatedAt: project.updatedAt,
     speakers,
     candidates,
@@ -371,21 +338,10 @@ export function applyShortDecision(
   },
   deps: ReviewDeps,
 ): SaveShortDecisionResult {
-  let loaded: { project: ProjectLike; notes?: string[] };
-  try {
-    loaded = deps.loadProject(request.projectPath);
-  } catch {
-    return {
-      ok: false,
-      error: safeError(
-        DESKTOP_ERROR_CODES.INVALID_PROJECT,
-        'project.json を読み込めませんでした。',
-        { recoverable: true },
-      ),
-    };
-  }
+  const loaded = loadProjectOrError(request.projectPath, deps);
+  if (!loaded.ok) return { ok: false, error: loaded.error };
 
-  const project = loaded.project;
+  const project = loaded.value.project;
 
   // ★競合更新の検出。読み込み後に別処理が更新していたら上書きしない。
   if (project.updatedAt !== request.expectedUpdatedAt) {
@@ -393,7 +349,7 @@ export function applyShortDecision(
   }
 
   const analysis = project.analysis;
-  if (analysis === undefined) return { ok: false, error: analysisNotReady() };
+  if (analysis === undefined) return { ok: false, error: analysisNotReadyError() };
 
   const candidates = analysis.shortCandidates ?? [];
   const target = candidates.find((c) => c.id === request.shortId);
@@ -441,21 +397,10 @@ export function removeShortDecision(
   request: { projectPath: string; shortId: string; expectedUpdatedAt: string },
   deps: ReviewDeps,
 ): SaveShortDecisionResult {
-  let loaded: { project: ProjectLike; notes?: string[] };
-  try {
-    loaded = deps.loadProject(request.projectPath);
-  } catch {
-    return {
-      ok: false,
-      error: safeError(
-        DESKTOP_ERROR_CODES.INVALID_PROJECT,
-        'project.json を読み込めませんでした。',
-        { recoverable: true },
-      ),
-    };
-  }
+  const loaded = loadProjectOrError(request.projectPath, deps);
+  if (!loaded.ok) return { ok: false, error: loaded.error };
 
-  const project = loaded.project;
+  const project = loaded.value.project;
   if (project.updatedAt !== request.expectedUpdatedAt) {
     return { ok: false, conflict: true, error: conflictError() };
   }
@@ -483,10 +428,10 @@ export function removeShortDecision(
 }
 
 /**
- * 保存し、保存結果を読み直して返す。
+ * 保存し、読み直して結果を組み立てる。
  *
- * ★保存後に必ず読み直す。書けたつもりで書けていない状態を、
- * 画面に「保存済み」と出したまま進ませないため。
+ * ★保存と読み直しは `review-common.ts` の `saveAndRebuild` に任せる。
+ * ここが持つのは**ショート候補固有の結果の形**（1要素を返す）だけ。
  */
 function persistAndReload(
   projectDir: string,
@@ -494,25 +439,13 @@ function persistAndReload(
   shortId: string,
   deps: ReviewDeps,
 ): SaveShortDecisionResult {
-  try {
-    deps.saveProject(projectDir, nextProject);
-  } catch {
-    // saveProject は一時ファイル→rename なので、失敗しても既存の
-    // project.json は壊れない。ここでは保存できなかったことだけを伝える。
-    return {
-      ok: false,
-      error: safeError(
-        DESKTOP_ERROR_CODES.UNKNOWN,
-        '判断を保存できませんでした。プロジェクトの内容は変更されていません。',
-        {
-          recoverable: true,
-          suggestedAction: '保存先の空き容量と書き込み権限を確認してください。',
-        },
-      ),
-    };
-  }
-
-  const reloaded = buildShortsData(projectDir, deps);
+  const reloaded = saveAndRebuild(
+    projectDir,
+    nextProject,
+    deps,
+    SAVE_FAILED_DECISION,
+    buildShortsData,
+  );
   if (!reloaded.ok) return { ok: false, error: reloaded.error };
 
   const candidate = reloaded.data.candidates.find((c) => c.id === shortId);

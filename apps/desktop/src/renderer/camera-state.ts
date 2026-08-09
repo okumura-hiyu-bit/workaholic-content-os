@@ -12,6 +12,12 @@
  */
 
 import type { SafePipelineError } from '../shared/dto.ts';
+import {
+  canExportBase,
+  isSavablePhase,
+  type ReviewPhaseBase,
+  type ReviewStateBase,
+} from './review-shared.tsx';
 import type {
   CameraCounts,
   CameraData,
@@ -20,16 +26,8 @@ import type {
 } from '../shared/camera-dto.ts';
 import { MIN_CAMERA_SHOT_SEC, TIME_EPSILON } from '../shared/camera-validate.ts';
 
-export type CameraPhase =
-  | 'loading'
-  | 'ready'
-  | 'dirty'
-  | 'saving'
-  | 'saved'
-  | 'conflict'
-  | 'export-running'
-  | 'export-complete'
-  | 'failed';
+/** ★4画面共通（`review-shared.tsx` の `ReviewPhaseBase`）。名前だけ画面側に残す。 */
+export type CameraPhase = ReviewPhaseBase;
 
 /** 一覧の絞り込み。カットが増えると問題のある箇所が埋もれるため。 */
 export type CameraFilter = 'all' | 'edited' | 'inserted' | 'problem';
@@ -49,22 +47,18 @@ export interface CameraInsertDraft {
   cameraId: string;
 }
 
-export interface CameraState {
-  phase: CameraPhase;
+/**
+ * ★共通フィールドは `ReviewStateBase` から継承する。
+ * ここに書くのはカメラ切替Review固有のものだけ。
+ */
+export interface CameraState extends ReviewStateBase {
   data?: CameraData;
-  /** 競合更新の検出に使う。保存のたびに更新する。 */
-  updatedAt?: string;
   /** 選択中のカット（IDではなく位置で持つ）。 */
   selectedIndex?: number;
   draft?: CameraDraft;
   /** 追加パネルを開いているときの下書き。 */
   insertDraft?: CameraInsertDraft;
-  dirty: boolean;
   filter: CameraFilter;
-  exportRunId?: string;
-  playheadSec: number;
-  error?: SafePipelineError;
-  lastSavedAt?: string;
 }
 
 export type CameraAction =
@@ -180,14 +174,7 @@ export function previewIssues(
 /** 保存できる状態か。★連打・二重保存・重なったままの保存を止める。 */
 export function canSave(state: CameraState): boolean {
   if (!state.dirty || state.draft === undefined || state.data === undefined) return false;
-  if (
-    state.phase === 'saving' ||
-    state.phase === 'conflict' ||
-    state.phase === 'export-running' ||
-    state.phase === 'loading'
-  ) {
-    return false;
-  }
+  if (!isSavablePhase(state)) return false;
   // ★重なり・不正な長さが残っているうちは保存させない。
   return previewIssues(state.data.shots, state.draft).length === 0;
 }
@@ -195,30 +182,20 @@ export function canSave(state: CameraState): boolean {
 /** カットを追加できる状態か。 */
 export function canInsert(state: CameraState): boolean {
   if (state.insertDraft === undefined || state.data === undefined) return false;
-  if (
-    state.phase === 'saving' ||
-    state.phase === 'conflict' ||
-    state.phase === 'export-running' ||
-    state.phase === 'loading'
-  ) {
-    return false;
-  }
+  if (!isSavablePhase(state)) return false;
   return previewIssues(state.data.shots, undefined, state.insertDraft).length === 0;
 }
 
 /** 再出力を始められるか。★実行中の再実行と、問題が残る状態での出力を止める。 */
 export function canExport(state: CameraState): boolean {
-  if (state.data === undefined || state.dirty) return false;
-  if (
-    state.phase === 'saving' ||
-    state.phase === 'export-running' ||
-    state.phase === 'conflict' ||
-    state.phase === 'loading'
-  ) {
-    return false;
-  }
-  // ★保存済みの内容に重なりが残っている場合も出力させない。
-  //   XMLを作り直す唯一の画面なので、壊れたまま書き出させない。
+  // ★`data` の有無は `canExportBase` も見るが、ここでも先に確かめる。
+  //   そうしないと以降が `state.data!` になり、「壊れたXMLを書き出させない」
+  //   という肝心の判定から型の裏付けが外れてしまう。
+  if (state.data === undefined) return false;
+  if (!canExportBase(state)) return false;
+  // ★カメラ固有：保存済みの内容に重なり・尺超過が残っている場合も出力させない。
+  //   FCP7 XML を作り直す画面なので、壊れたまま書き出させない。
+  //   他の3画面には無い条件なので共通化していない。
   return state.data.counts.overlaps === 0 && state.data.counts.outOfRange === 0;
 }
 

@@ -8,36 +8,24 @@
  * 黄：低confidence語 / 赤：孤立修正・競合 / 青：保存済みの修正
  */
 
-import { useCallback, useEffect, useReducer, useRef, useState, type JSX } from 'react';
+import { useCallback, useEffect, useReducer, type JSX } from 'react';
 
 import type { ProjectSummary } from '../shared/dto.ts';
 import type { ReviewSubtitleCue } from '../shared/review-dto.ts';
 import { formatTimecode, splitByLowConfidence } from './format.ts';
+import {
+  ReviewPlayer,
+  SaveBadge,
+  useReviewMedia,
+  usePipelineFinished,
+} from './review-shared.tsx';
 import {
   canEditCue,
   canExport,
   canSave,
   initialReviewState,
   reducer,
-  type ReviewState,
 } from './review-state.ts';
-
-const SKIP_SEC = 5;
-
-function SaveBadge({ state }: { state: ReviewState }): JSX.Element {
-  const label =
-    state.phase === 'saving' ? '保存中…'
-    : state.phase === 'conflict' ? '競合しています'
-    : state.dirty ? '未保存の変更あり'
-    : state.phase === 'saved' ? '保存しました'
-    : '変更なし';
-  const tone =
-    state.phase === 'conflict' ? 'danger'
-    : state.dirty ? 'warn'
-    : state.phase === 'saved' ? 'ok'
-    : 'muted';
-  return <span className={`badge badge--${tone}`}>{label}</span>;
-}
 
 function CueText({ cue }: { cue: ReviewSubtitleCue }): JSX.Element {
   const parts = splitByLowConfidence(cue.text, cue.lowConfidenceWords);
@@ -64,9 +52,10 @@ export function ReviewScreen({
   onBack: () => void;
 }): JSX.Element {
   const [state, dispatch] = useReducer(reducer, initialReviewState);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const [mediaUrl, setMediaUrl] = useState<string | undefined>(undefined);
-  const [mediaNote, setMediaNote] = useState<string | undefined>(undefined);
+  const media = useReviewMedia(summary.projectPath);
+  // ★`setMediaUrl` は恒久的に安定なので、依存に入れても `load` の同一性は
+  //   案件が変わったときしか変わらない（＝完了イベントの購読は張り直されない）。
+  const { setMediaUrl } = media;
 
   const load = useCallback(async () => {
     dispatch({ type: 'load/started' });
@@ -77,36 +66,23 @@ export function ReviewScreen({
     } else {
       dispatch({ type: 'load/failed', error: result.error });
     }
-  }, [summary.projectPath]);
+  }, [summary.projectPath, setMediaUrl]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  // ★再出力の完了は既存の完了イベントで受け取る。購読解除を必ず行う。
-  useEffect(() => {
-    const off = window.contentOs.onPipelineFinished((event) => {
+  // ★再出力の完了は既存の完了イベントで受け取る（購読解除は Hook が行う）。
+  usePipelineFinished(
+    (event) =>
       dispatch({
         type: 'export/finished',
         runId: event.runId,
-        ok: event.outcome === 'completed' || event.outcome === 'warning',
+        ok: event.ok,
         ...(event.error !== undefined ? { error: event.error } : {}),
-      });
-      void load();
-    });
-    return () => off();
-  }, [load]);
-
-  const prepareMedia = useCallback(async () => {
-    setMediaNote('プレビュー音声を準備しています…');
-    const result = await window.contentOs.reviewOpenMedia(summary.projectPath);
-    if (result.ok) {
-      setMediaUrl(result.media.url);
-      setMediaNote(undefined);
-    } else {
-      setMediaNote(result.error.userMessage);
-    }
-  }, [summary.projectPath]);
+      }),
+    load,
+  );
 
   const cues = state.data?.subtitles ?? [];
   const selected =
@@ -180,19 +156,6 @@ export function ReviewScreen({
   }, [state, summary.projectPath]);
 
   // ─── 再生操作 ───────────────────────────────────────
-
-  const seek = useCallback((sec: number) => {
-    const audio = audioRef.current;
-    if (audio === null) return;
-    audio.currentTime = Math.max(0, sec);
-  }, []);
-
-  const togglePlay = useCallback(() => {
-    const audio = audioRef.current;
-    if (audio === null) return;
-    if (audio.paused) void audio.play();
-    else audio.pause();
-  }, []);
 
   if (state.phase === 'loading') {
     return (
@@ -286,56 +249,12 @@ export function ReviewScreen({
       {/* ── 再生エリア ── */}
       <section className="card">
         <h3 className="card__subtitle">再生（音声）</h3>
-        {mediaUrl === undefined ? (
-          <div className="card__actions">
-            <button type="button" className="btn btn--secondary" onClick={() => void prepareMedia()}>
-              プレビュー音声を用意する
-            </button>
-            {mediaNote !== undefined && <span className="review__note">{mediaNote}</span>}
-          </div>
-        ) : (
-          <>
-            {/* 4K素材は再生しない。cache/preview に作った低ビットレート音声のみ。 */}
-            <audio
-              ref={audioRef}
-              src={mediaUrl}
-              preload="metadata"
-              onTimeUpdate={(e) =>
-                dispatch({ type: 'playhead/moved', sec: e.currentTarget.currentTime })
-              }
-            />
-            <div className="player">
-              <button type="button" className="btn btn--secondary" onClick={togglePlay}>
-                再生 / 停止
-              </button>
-              <button
-                type="button"
-                className="btn btn--secondary"
-                onClick={() => seek(state.playheadSec - SKIP_SEC)}
-              >
-                ← 5秒
-              </button>
-              <button
-                type="button"
-                className="btn btn--secondary"
-                onClick={() => seek(state.playheadSec + SKIP_SEC)}
-              >
-                5秒 →
-              </button>
-              <span className="player__tc">{formatTimecode(state.playheadSec)}</span>
-              <input
-                className="player__seek"
-                type="range"
-                min={0}
-                max={Math.max(1, data.media?.durationSec ?? 1)}
-                step={0.1}
-                value={state.playheadSec}
-                onChange={(e) => seek(Number(e.currentTarget.value))}
-                aria-label="再生位置"
-              />
-            </div>
-          </>
-        )}
+        <ReviewPlayer
+          media={media}
+          durationSec={data.media?.durationSec ?? 1}
+          playheadSec={state.playheadSec}
+          onPlayheadChange={(sec) => dispatch({ type: 'playhead/moved', sec })}
+        />
       </section>
 
       {/* ── 孤立・競合 ── */}
@@ -405,7 +324,7 @@ export function ReviewScreen({
                 className="cues__button"
                 onClick={() => {
                   dispatch({ type: 'cue/selected', index });
-                  seek(cue.startSec);
+                  media.seek(cue.startSec);
                 }}
               >
                 <span className="cues__tc">

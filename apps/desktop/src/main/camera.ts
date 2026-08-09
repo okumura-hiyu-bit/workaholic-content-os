@@ -17,7 +17,7 @@
  * 気づけない壊れ方をする。そのため**保存前に必ず適用後の並びを検査する**。
  */
 
-import type { ProjectSummary, SafePipelineError } from '../shared/dto.ts';
+import type { SafePipelineError } from '../shared/dto.ts';
 import { DESKTOP_ERROR_CODES, safeError } from '../shared/errors.ts';
 import type {
   CameraCounts,
@@ -38,7 +38,14 @@ import {
   validateShotRange,
 } from '../shared/camera-validate.ts';
 import type { ReviewMedia } from '../shared/review-dto.ts';
-import { conflictError } from '../shared/validate-common.ts';
+import {
+  analysisNotReadyError,
+  loadForSave as loadProjectForSave,
+  loadProjectOrError,
+  SAVE_FAILED_EDIT,
+  saveAndRebuild,
+  summaryOf,
+} from './review-common.ts';
 import type {
   AnalysisCameraShotLike,
   CameraEditsLike,
@@ -211,24 +218,6 @@ function toOrphaned(
     });
 }
 
-function summaryOf(
-  project: ProjectLike,
-  projectDir: string,
-  notes: string[],
-): ProjectSummary {
-  const summary: ProjectSummary = {
-    projectPath: projectDir,
-    projectId: project.id,
-    name: project.name,
-    status: project.status,
-    assetCount: Array.isArray(project.assets) ? project.assets.length : 0,
-    updatedAt: project.updatedAt,
-    notes,
-  };
-  if (project.recordedAt !== undefined) summary.recordedAt = project.recordedAt;
-  return summary;
-}
-
 export function countsOf(
   shots: readonly CameraShotItem[],
   orphaned: readonly unknown[],
@@ -246,17 +235,6 @@ export function countsOf(
     tooShort: shots.filter((s) => s.tooShort).length,
     outOfRange: shots.filter((s) => s.outOfRange).length,
   };
-}
-
-function analysisNotReady(): SafePipelineError {
-  return safeError(
-    DESKTOP_ERROR_CODES.ANALYSIS_NOT_READY,
-    'このプロジェクトはまだ解析されていません。',
-    {
-      recoverable: true,
-      suggestedAction: '先に「解析開始」を実行してください。',
-    },
-  );
 }
 
 /** `edits.cameraShots` を安全に取り出す（旧形式・手書きで欠けていても落ちない）。 */
@@ -277,24 +255,13 @@ export function buildCameraData(
   projectDir: string,
   deps: ReviewDeps,
 ): CameraLoadResult {
-  let loaded: { project: ProjectLike; notes?: string[] };
-  try {
-    loaded = deps.loadProject(projectDir);
-  } catch {
-    return {
-      ok: false,
-      error: safeError(
-        DESKTOP_ERROR_CODES.INVALID_PROJECT,
-        'project.json を読み込めませんでした。',
-        { recoverable: true },
-      ),
-    };
-  }
+  const loaded = loadProjectOrError(projectDir, deps);
+  if (!loaded.ok) return { ok: false, error: loaded.error };
 
-  const project = loaded.project;
+  const project = loaded.value.project;
   const analysis = project.analysis;
   if (analysis === undefined || !Array.isArray(analysis.subtitles)) {
-    return { ok: false, error: analysisNotReady() };
+    return { ok: false, error: analysisNotReadyError() };
   }
 
   // ★表示値は resolveProject に作らせる（独自の突き合わせをしない）。
@@ -329,7 +296,7 @@ export function buildCameraData(
   const edits = cameraEditsOf(project.edits);
 
   const data: CameraData = {
-    summary: summaryOf(project, projectDir, loaded.notes ?? []),
+    summary: summaryOf(project, projectDir, loaded.value.notes ?? []),
     updatedAt: project.updatedAt,
     cameras,
     shots,
@@ -388,49 +355,32 @@ interface LoadedForSave {
   analysisShots: AnalysisCameraShotLike[];
 }
 
-/** 読み込み・競合検出・解析の有無をまとめて行う。 */
+/**
+ * 読み込み・競合検出・解析の有無をまとめて行い、カメラ固有の断片を取り出す。
+ * ★共通部分（読み込み・競合・解析の有無）は `review-common.ts` に集約済み。
+ */
 function loadForSave(
   projectPath: string,
   expectedUpdatedAt: string,
   deps: ReviewDeps,
 ): { ok: true; value: LoadedForSave } | { ok: false; result: SaveCameraEditResult } {
-  let loaded: { project: ProjectLike; notes?: string[] };
-  try {
-    loaded = deps.loadProject(projectPath);
-  } catch {
+  const loaded = loadProjectForSave(projectPath, expectedUpdatedAt, deps);
+  if (!loaded.ok) {
     return {
       ok: false,
-      result: {
-        ok: false,
-        error: safeError(
-          DESKTOP_ERROR_CODES.INVALID_PROJECT,
-          'project.json を読み込めませんでした。',
-          { recoverable: true },
-        ),
-      },
+      result: loaded.conflict === true
+        ? { ok: false, conflict: true, error: loaded.error }
+        : { ok: false, error: loaded.error },
     };
   }
 
   const project = loaded.project;
-
-  // ★競合更新の検出。読み込み後に別処理が更新していたら上書きしない。
-  if (project.updatedAt !== expectedUpdatedAt) {
-    return {
-      ok: false,
-      result: { ok: false, conflict: true, error: conflictError() },
-    };
-  }
-
-  if (project.analysis === undefined) {
-    return { ok: false, result: { ok: false, error: analysisNotReady() } };
-  }
-
   return {
     ok: true,
     value: {
       project,
       edits: cameraEditsOf(project.edits),
-      analysisShots: project.analysis.cameraShots ?? [],
+      analysisShots: loaded.analysis.cameraShots ?? [],
     },
   };
 }
@@ -511,33 +461,26 @@ export function assertTimelineSafe(
   return undefined;
 }
 
-/** 保存し、読み直して並び全体を返す。 */
+/**
+ * 保存し、読み直して**並び全体**を返す。
+ *
+ * ★保存と読み直しは `review-common.ts` の `saveAndRebuild` に任せる。
+ * ★ただし結果の形はカメラ固有：字幕・ショート・マーカーが「1要素」を返すのに対し、
+ * カメラは追加・削除・時間変更が隣のカットの重なり・隙間まで変えるため
+ * **並び全体**を返す。この違いがあるので結果の組み立ては共通化していない。
+ */
 function persistAndReload(
   projectDir: string,
   nextProject: ProjectLike,
   deps: ReviewDeps,
 ): SaveCameraEditResult {
-  try {
-    deps.saveProject(projectDir, nextProject);
-  } catch {
-    // saveProject は一時ファイル→rename なので、失敗しても既存の
-    // project.json は壊れない。ここでは保存できなかったことだけを伝える。
-    return {
-      ok: false,
-      error: safeError(
-        DESKTOP_ERROR_CODES.UNKNOWN,
-        '修正を保存できませんでした。プロジェクトの内容は変更されていません。',
-        {
-          recoverable: true,
-          suggestedAction: '保存先の空き容量と書き込み権限を確認してください。',
-        },
-      ),
-    };
-  }
-
-  // ★保存後に必ず読み直す。書けたつもりで書けていない状態を、
-  //   画面に「保存済み」と出したまま進ませないため。
-  const reloaded = buildCameraData(projectDir, deps);
+  const reloaded = saveAndRebuild(
+    projectDir,
+    nextProject,
+    deps,
+    SAVE_FAILED_EDIT,
+    buildCameraData,
+  );
   if (!reloaded.ok) return { ok: false, error: reloaded.error };
 
   return {

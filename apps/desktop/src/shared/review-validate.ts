@@ -14,6 +14,7 @@ import type { Validated } from './validate.ts';
 import { validateProjectPath } from './validate.ts';
 import {
   CONTROL_CHARS,
+  createIdValidator,
   invalid,
   validateExpectedUpdatedAt,
   validateTimeSec,
@@ -37,15 +38,7 @@ const SUBTITLE_ID = /^sub-[0-9]{8,12}(?:-[0-9]{1,4})?$/;
 /** 話者IDに許す文字。 */
 const SPEAKER_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 
-export function validateSubtitleId(value: unknown): Validated<string> {
-  if (typeof value !== 'string' || value.length === 0) {
-    return invalid('字幕IDが指定されていません。');
-  }
-  if (!SUBTITLE_ID.test(value)) {
-    return invalid('字幕IDの形式が不正です。');
-  }
-  return { ok: true, value };
-}
+export const validateSubtitleId = createIdValidator(SUBTITLE_ID, '字幕ID');
 
 /**
  * 字幕本文の検証。

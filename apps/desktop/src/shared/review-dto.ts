@@ -188,11 +188,17 @@ export type SaveSubtitleEditResult =
 
 // ─── 再出力 ────────────────────────────────────────────
 
+/**
+ * 再出力のリクエスト。★4画面で完全に同じ形なので共有する。
+ * どの工程を動かすかは Main が固定するため、リクエストはパスだけでよい。
+ */
 export interface ReviewExportRequest {
   projectPath: string;
 }
 
 /**
+ * 再出力の結果。★4画面で完全に同じ形なので共有する。
+ *
  * 再出力は既存の部分実行に乗せる。
  * ★どの工程を動かすかは Main が固定する（Renderer に選ばせない）。
  */

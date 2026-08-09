@@ -15,6 +15,12 @@
  */
 
 import type { SafePipelineError } from '../shared/dto.ts';
+import {
+  canExportBase,
+  isSavablePhase,
+  type ReviewPhaseBase,
+  type ReviewStateBase,
+} from './review-shared.tsx';
 import type {
   MarkerCounts,
   MarkerData,
@@ -23,16 +29,8 @@ import type {
   MarkerOrphanedEdit,
 } from '../shared/marker-dto.ts';
 
-export type MarkerPhase =
-  | 'loading'
-  | 'ready'
-  | 'dirty'
-  | 'saving'
-  | 'saved'
-  | 'conflict'
-  | 'export-running'
-  | 'export-complete'
-  | 'failed';
+/** ★4画面共通（`review-shared.tsx` の `ReviewPhaseBase`）。名前だけ画面側に残す。 */
+export type MarkerPhase = ReviewPhaseBase;
 
 /** 状態での絞り込み。種別の絞り込みとは独立に効く。 */
 export type MarkerFilter = 'all' | 'edited' | 'attention';
@@ -43,22 +41,18 @@ export interface MarkerDraft {
   comment: string;
 }
 
-export interface MarkerState {
-  phase: MarkerPhase;
+/**
+ * ★共通フィールドは `ReviewStateBase` から継承する。
+ * ここに書くのはマーカーReview固有のものだけ。
+ */
+export interface MarkerState extends ReviewStateBase {
   data?: MarkerData;
-  /** 競合更新の検出に使う。保存のたびに更新する。 */
-  updatedAt?: string;
   /** 選択中のマーカー（IDではなく位置で持つ）。 */
   selectedIndex?: number;
   draft?: MarkerDraft;
-  dirty: boolean;
   filter: MarkerFilter;
   /** 種別の絞り込み。undefined はすべて。 */
   kindFilter?: MarkerKindDto;
-  exportRunId?: string;
-  playheadSec: number;
-  error?: SafePipelineError;
-  lastSavedAt?: string;
 }
 
 export type MarkerAction =
@@ -127,28 +121,17 @@ export function canEditMarker(marker: MarkerItem | undefined): boolean {
 /** 保存できる状態か。★連打・二重保存を止める唯一の判定。 */
 export function canSave(state: MarkerState): boolean {
   if (!state.dirty || state.draft === undefined || state.data === undefined) return false;
-  if (
-    state.phase === 'saving' ||
-    state.phase === 'conflict' ||
-    state.phase === 'export-running' ||
-    state.phase === 'loading'
-  ) {
-    return false;
-  }
+  if (!isSavablePhase(state)) return false;
   // ★ID重複のマーカーは保存させない（修正が両方に適用されてしまうため）。
   return canEditMarker(state.data.markers[state.draft.index]);
 }
 
-/** 再出力を始められるか。★実行中の再実行を止める。 */
+/**
+ * 再出力を始められるか。★実行中の再実行を止める。
+ * 判定は4画面共通（`review-shared.tsx` の `canExportBase`）。
+ */
 export function canExport(state: MarkerState): boolean {
-  return (
-    state.data !== undefined &&
-    !state.dirty &&
-    state.phase !== 'saving' &&
-    state.phase !== 'export-running' &&
-    state.phase !== 'conflict' &&
-    state.phase !== 'loading'
-  );
+  return canExportBase(state);
 }
 
 /** 絞り込みを適用したマーカーの位置一覧を返す（元の index を保つ）。 */

@@ -33,7 +33,7 @@
 //   ここだけ古い判定のまま残る。
 import { timeFromId } from '@contentos/core/project';
 
-import type { ProjectSummary, SafePipelineError } from '../shared/dto.ts';
+import type { SafePipelineError } from '../shared/dto.ts';
 import { DESKTOP_ERROR_CODES, safeError } from '../shared/errors.ts';
 import type {
   MarkerCounts,
@@ -47,7 +47,14 @@ import type {
   SaveMarkerEditResult,
 } from '../shared/marker-dto.ts';
 import type { ReviewMedia } from '../shared/review-dto.ts';
-import { conflictError } from '../shared/validate-common.ts';
+import {
+  analysisNotReadyError,
+  loadForSave as loadProjectForSave,
+  loadProjectOrError,
+  SAVE_FAILED_EDIT,
+  saveAndRebuild,
+  summaryOf,
+} from './review-common.ts';
 import type {
   AnalysisMarkerLike,
   EditsLike,
@@ -208,24 +215,6 @@ function toOrphaned(
     });
 }
 
-function summaryOf(
-  project: ProjectLike,
-  projectDir: string,
-  notes: string[],
-): ProjectSummary {
-  const summary: ProjectSummary = {
-    projectPath: projectDir,
-    projectId: project.id,
-    name: project.name,
-    status: project.status,
-    assetCount: Array.isArray(project.assets) ? project.assets.length : 0,
-    updatedAt: project.updatedAt,
-    notes,
-  };
-  if (project.recordedAt !== undefined) summary.recordedAt = project.recordedAt;
-  return summary;
-}
-
 export function countsOf(
   markers: readonly MarkerItem[],
   orphaned: readonly unknown[],
@@ -262,17 +251,6 @@ export function kindCountsOf(markers: readonly MarkerItem[]): MarkerKindCount[] 
     }));
 }
 
-function analysisNotReady(): SafePipelineError {
-  return safeError(
-    DESKTOP_ERROR_CODES.ANALYSIS_NOT_READY,
-    'このプロジェクトはまだ解析されていません。',
-    {
-      recoverable: true,
-      suggestedAction: '先に「解析開始」を実行してください。',
-    },
-  );
-}
-
 /** `edits.markers` を安全に取り出す（旧形式・手書きで欠けていても落ちない）。 */
 export function markerEditsOf(edits: EditsLike): Record<string, MarkerEditLike> {
   const raw = edits.markers;
@@ -284,24 +262,13 @@ export function buildMarkerData(
   projectDir: string,
   deps: ReviewDeps,
 ): MarkerLoadResult {
-  let loaded: { project: ProjectLike; notes?: string[] };
-  try {
-    loaded = deps.loadProject(projectDir);
-  } catch {
-    return {
-      ok: false,
-      error: safeError(
-        DESKTOP_ERROR_CODES.INVALID_PROJECT,
-        'project.json を読み込めませんでした。',
-        { recoverable: true },
-      ),
-    };
-  }
+  const loaded = loadProjectOrError(projectDir, deps);
+  if (!loaded.ok) return { ok: false, error: loaded.error };
 
-  const project = loaded.project;
+  const project = loaded.value.project;
   const analysis = project.analysis;
   if (analysis === undefined || !Array.isArray(analysis.subtitles)) {
-    return { ok: false, error: analysisNotReady() };
+    return { ok: false, error: analysisNotReadyError() };
   }
 
   // ★表示値は resolveProject に作らせる（独自の突き合わせをしない）。
@@ -325,7 +292,7 @@ export function buildMarkerData(
   const deletedCount = Object.values(edits).filter((e) => e.deleted === true).length;
 
   const data: MarkerData = {
-    summary: summaryOf(project, projectDir, loaded.notes ?? []),
+    summary: summaryOf(project, projectDir, loaded.value.notes ?? []),
     updatedAt: project.updatedAt,
     markers,
     counts: countsOf(markers, orphaned, deletedCount),
@@ -393,57 +360,41 @@ interface LoadedForSave {
 }
 
 /**
- * 読み込み・競合検出・解析の有無をまとめて行う。
- * ★カメラ切替の `loadForSave` と同じ形（4画面で同型なので将来共通化できる）。
+ * 読み込み・競合検出・解析の有無をまとめて行い、マーカー固有の断片を取り出す。
+ * ★共通部分（読み込み・競合・解析の有無）は `review-common.ts` に集約済み。
  */
 function loadForSave(
   projectPath: string,
   expectedUpdatedAt: string,
   deps: ReviewDeps,
 ): { ok: true; value: LoadedForSave } | { ok: false; result: SaveMarkerEditResult } {
-  let loaded: { project: ProjectLike; notes?: string[] };
-  try {
-    loaded = deps.loadProject(projectPath);
-  } catch {
+  const loaded = loadProjectForSave(projectPath, expectedUpdatedAt, deps);
+  if (!loaded.ok) {
     return {
       ok: false,
-      result: {
-        ok: false,
-        error: safeError(
-          DESKTOP_ERROR_CODES.INVALID_PROJECT,
-          'project.json を読み込めませんでした。',
-          { recoverable: true },
-        ),
-      },
+      result: loaded.conflict === true
+        ? { ok: false, conflict: true, error: loaded.error }
+        : { ok: false, error: loaded.error },
     };
   }
 
   const project = loaded.project;
-
-  // ★競合更新の検出。読み込み後に別処理が更新していたら上書きしない。
-  if (project.updatedAt !== expectedUpdatedAt) {
-    return { ok: false, result: { ok: false, conflict: true, error: conflictError() } };
-  }
-
-  if (project.analysis === undefined) {
-    return { ok: false, result: { ok: false, error: analysisNotReady() } };
-  }
-
   return {
     ok: true,
     value: {
       project,
       edits: markerEditsOf(project.edits),
-      analysisMarkers: project.analysis.markers ?? [],
+      analysisMarkers: loaded.analysis.markers ?? [],
     },
   };
 }
 
 /**
- * 保存し、保存結果を読み直して返す。
+ * 保存し、読み直して結果を組み立てる。
  *
- * ★保存後に必ず読み直す。書けたつもりで書けていない状態を、
- * 画面に「保存済み」と出したまま進ませないため。
+ * ★保存と読み直しは `review-common.ts` の `saveAndRebuild` に任せる。
+ * ここが持つのは**マーカー固有の結果の形**だけ
+ * （削除した場合は一覧から消えるので `marker` を返さない）。
  */
 function persistAndReload(
   projectDir: string,
@@ -451,25 +402,13 @@ function persistAndReload(
   markerId: string,
   deps: ReviewDeps,
 ): SaveMarkerEditResult {
-  try {
-    deps.saveProject(projectDir, nextProject);
-  } catch {
-    // saveProject は一時ファイル→rename なので、失敗しても既存の
-    // project.json は壊れない。ここでは保存できなかったことだけを伝える。
-    return {
-      ok: false,
-      error: safeError(
-        DESKTOP_ERROR_CODES.UNKNOWN,
-        '修正を保存できませんでした。プロジェクトの内容は変更されていません。',
-        {
-          recoverable: true,
-          suggestedAction: '保存先の空き容量と書き込み権限を確認してください。',
-        },
-      ),
-    };
-  }
-
-  const reloaded = buildMarkerData(projectDir, deps);
+  const reloaded = saveAndRebuild(
+    projectDir,
+    nextProject,
+    deps,
+    SAVE_FAILED_EDIT,
+    buildMarkerData,
+  );
   if (!reloaded.ok) return { ok: false, error: reloaded.error };
 
   // ★削除した場合は一覧から消えるので marker を返さない（undefined）。

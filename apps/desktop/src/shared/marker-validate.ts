@@ -19,6 +19,7 @@ import type {
 import type { Validated } from './validate.ts';
 import { validateProjectPath } from './validate.ts';
 import {
+  createIdValidator,
   invalid,
   validateExpectedUpdatedAt,
   validateMultiLineText,
@@ -51,15 +52,7 @@ export const MAX_MARKER_COMMENT_LENGTH = 2000;
  */
 const MARKER_ID = /^mk-[A-Z]{2,12}-[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 
-export function validateMarkerId(value: unknown): Validated<string> {
-  if (typeof value !== 'string' || value.length === 0) {
-    return invalid('マーカーIDが指定されていません。');
-  }
-  if (!MARKER_ID.test(value)) {
-    return invalid('マーカーIDの形式が不正です。');
-  }
-  return { ok: true, value };
-}
+export const validateMarkerId = createIdValidator(MARKER_ID, 'マーカーID');
 
 /**
  * マーカーの修正内容。

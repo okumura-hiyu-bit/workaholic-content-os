@@ -10,11 +10,17 @@
  * どちらも実装で回避できない性質なので、編集を始める前に見える位置に置く。
  */
 
-import { useCallback, useEffect, useReducer, useRef, useState, type JSX } from 'react';
+import { useCallback, useEffect, useReducer, useState, type JSX } from 'react';
 
 import type { ProjectSummary } from '../shared/dto.ts';
 import type { ShortCandidateItem } from '../shared/shorts-dto.ts';
 import { formatTimecode } from './format.ts';
+import {
+  ReviewPlayer,
+  SaveBadge,
+  useReviewMedia,
+  usePipelineFinished,
+} from './review-shared.tsx';
 import {
   canExport,
   canSave,
@@ -23,10 +29,7 @@ import {
   reducer,
   visibleIndexes,
   type ShortsFilter,
-  type ShortsState,
 } from './shorts-state.ts';
-
-const SKIP_SEC = 5;
 
 const FILTER_LABELS: { value: ShortsFilter; label: string }[] = [
   { value: 'all', label: 'すべて' },
@@ -34,21 +37,6 @@ const FILTER_LABELS: { value: ShortsFilter; label: string }[] = [
   { value: 'adopted', label: '採用' },
   { value: 'rejected', label: '不採用' },
 ];
-
-function SaveBadge({ state }: { state: ShortsState }): JSX.Element {
-  const label =
-    state.phase === 'saving' ? '保存中…'
-    : state.phase === 'conflict' ? '競合しています'
-    : state.dirty ? '未保存の変更あり'
-    : state.phase === 'saved' ? '保存しました'
-    : '変更なし';
-  const tone =
-    state.phase === 'conflict' ? 'danger'
-    : state.dirty ? 'warn'
-    : state.phase === 'saved' ? 'ok'
-    : 'muted';
-  return <span className={`badge badge--${tone}`}>{label}</span>;
-}
 
 function adoptionLabel(adopted: boolean | undefined): string {
   if (adopted === true) return '採用';
@@ -68,9 +56,10 @@ export function ShortsScreen({
   onBack: () => void;
 }): JSX.Element {
   const [state, dispatch] = useReducer(reducer, initialShortsState);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const [mediaUrl, setMediaUrl] = useState<string | undefined>(undefined);
-  const [mediaNote, setMediaNote] = useState<string | undefined>(undefined);
+  const media = useReviewMedia(summary.projectPath);
+  // ★`setMediaUrl` は恒久的に安定なので、依存に入れても `load` の同一性は
+  //   案件が変わったときしか変わらない（＝完了イベントの購読は張り直されない）。
+  const { setMediaUrl } = media;
   /** ハッシュタグは1行1件のテキストで編集する（配列を直接触らせない）。 */
   const [tagText, setTagText] = useState<string | undefined>(undefined);
 
@@ -84,36 +73,23 @@ export function ShortsScreen({
       dispatch({ type: 'load/failed', error: result.error });
     }
     setTagText(undefined);
-  }, [summary.projectPath]);
+  }, [summary.projectPath, setMediaUrl]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  // ★再出力の完了は既存の完了イベントで受け取る。購読解除を必ず行う。
-  useEffect(() => {
-    const off = window.contentOs.onPipelineFinished((event) => {
+  // ★再出力の完了は既存の完了イベントで受け取る（購読解除は Hook が行う）。
+  usePipelineFinished(
+    (event) =>
       dispatch({
         type: 'export/finished',
         runId: event.runId,
-        ok: event.outcome === 'completed' || event.outcome === 'warning',
+        ok: event.ok,
         ...(event.error !== undefined ? { error: event.error } : {}),
-      });
-      void load();
-    });
-    return () => off();
-  }, [load]);
-
-  const prepareMedia = useCallback(async () => {
-    setMediaNote('プレビュー音声を準備しています…');
-    const result = await window.contentOs.reviewOpenMedia(summary.projectPath);
-    if (result.ok) {
-      setMediaUrl(result.media.url);
-      setMediaNote(undefined);
-    } else {
-      setMediaNote(result.error.userMessage);
-    }
-  }, [summary.projectPath]);
+      }),
+    load,
+  );
 
   const candidates = state.data?.candidates ?? [];
   const selected =
@@ -125,19 +101,9 @@ export function ShortsScreen({
         ? draftOf(selected, state.selectedIndex)
         : undefined;
 
-  const seek = useCallback((sec: number) => {
-    const audio = audioRef.current;
-    if (audio === null) return;
-    audio.currentTime = Math.max(0, sec);
-  }, []);
-
-  const togglePlay = useCallback(() => {
-    const audio = audioRef.current;
-    if (audio === null) return;
-    if (audio.paused) void audio.play();
-    else audio.pause();
-  }, []);
-
+  // ★依存は `media` 全体ではなく `media.seek`。`seek` は恒久的に安定なので、
+  //   移設前（画面内の `useCallback([])` を依存にしていた頃）と同じ同一性を保つ。
+  const { seek } = media;
   const selectCandidate = useCallback(
     (index: number, candidate: ShortCandidateItem) => {
       dispatch({ type: 'candidate/selected', index });
@@ -318,60 +284,12 @@ export function ShortsScreen({
       {/* ── 再生エリア ── */}
       <section className="card">
         <h3 className="card__subtitle">再生（音声）</h3>
-        {mediaUrl === undefined ? (
-          <div className="card__actions">
-            <button
-              type="button"
-              className="btn btn--secondary"
-              onClick={() => void prepareMedia()}
-            >
-              プレビュー音声を用意する
-            </button>
-            {mediaNote !== undefined && <span className="review__note">{mediaNote}</span>}
-          </div>
-        ) : (
-          <>
-            {/* 4K素材は再生しない。cache/preview に作った低ビットレート音声のみ。 */}
-            <audio
-              ref={audioRef}
-              src={mediaUrl}
-              preload="metadata"
-              onTimeUpdate={(e) =>
-                dispatch({ type: 'playhead/moved', sec: e.currentTarget.currentTime })
-              }
-            />
-            <div className="player">
-              <button type="button" className="btn btn--secondary" onClick={togglePlay}>
-                再生 / 停止
-              </button>
-              <button
-                type="button"
-                className="btn btn--secondary"
-                onClick={() => seek(state.playheadSec - SKIP_SEC)}
-              >
-                ← 5秒
-              </button>
-              <button
-                type="button"
-                className="btn btn--secondary"
-                onClick={() => seek(state.playheadSec + SKIP_SEC)}
-              >
-                5秒 →
-              </button>
-              <span className="player__tc">{formatTimecode(state.playheadSec)}</span>
-              <input
-                className="player__seek"
-                type="range"
-                min={0}
-                max={Math.max(1, data.media?.durationSec ?? 1)}
-                step={0.1}
-                value={state.playheadSec}
-                onChange={(e) => seek(Number(e.currentTarget.value))}
-                aria-label="再生位置"
-              />
-            </div>
-          </>
-        )}
+        <ReviewPlayer
+          media={media}
+          durationSec={data.media?.durationSec ?? 1}
+          playheadSec={state.playheadSec}
+          onPlayheadChange={(sec) => dispatch({ type: 'playhead/moved', sec })}
+        />
       </section>
 
       {/* ── 孤立・取り違え ── */}

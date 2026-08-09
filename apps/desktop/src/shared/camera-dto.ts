@@ -26,6 +26,7 @@
  */
 
 import type { ProjectSummary, SafePipelineError } from './dto.ts';
+import type { ReviewExportRequest, ReviewExportResult, ReviewMedia } from './review-dto.ts';
 
 // ─── 読み取り ──────────────────────────────────────────
 
@@ -149,12 +150,8 @@ export interface CameraData {
   timelineDurationSec: number;
   /** 最短ショット長（`DEFAULT_CAMERA_RULES.minShotSec` に合わせる）。 */
   minShotSec: number;
-  /** 再生用プレビュー。字幕Reviewと同じものを使い回す。 */
-  media?: {
-    url: string;
-    durationSec: number;
-    sourceFileName: string;
-  };
+  /** 再生用プレビュー。★4画面で同じ型（`review-dto.ts` の `ReviewMedia`）。 */
+  media?: ReviewMedia;
   /**
    * ★常時表示する注意書き。Main が本文を持ち、Renderer のフラグで消せない。
    * カメラ修正だけが Premiere プロジェクト（FCP7 XML）を書き換えるため。
@@ -245,9 +242,11 @@ export type SaveCameraEditResult =
 
 // ─── 再出力 ────────────────────────────────────────────
 
-export interface CameraExportRequest {
-  projectPath: string;
-}
+/**
+ * 再出力のリクエスト。★4画面で同じ形なので `ReviewExportRequest` を使う
+ * （画面ごとの別名として残すのは、呼び出し側の読みやすさのため）。
+ */
+export type CameraExportRequest = ReviewExportRequest;
 
 /**
  * 再出力は既存の部分実行に乗せる。
@@ -255,6 +254,4 @@ export interface CameraExportRequest {
  * ★字幕と同じ3工程。`generate-premiere-xml` は**必須**
  * （カメラ修正が反映される成果物は FCP7 XML だけのため）。
  */
-export type CameraExportResult =
-  | { ok: true; runId: string; steps: string[] }
-  | { ok: false; error: SafePipelineError };
+export type CameraExportResult = ReviewExportResult;

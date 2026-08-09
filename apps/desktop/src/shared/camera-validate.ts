@@ -27,6 +27,7 @@ import type {
 import type { Validated } from './validate.ts';
 import { validateProjectPath } from './validate.ts';
 import {
+  createIdValidator,
   invalid,
   validateExpectedUpdatedAt,
   validateTimeSec,
@@ -67,15 +68,7 @@ export const TIME_EPSILON = 0.001;
 /** 1本の収録に置けるカットの上限。異常な件数でXMLを膨張させないため。 */
 export const MAX_CAMERA_SHOTS = 5000;
 
-export function validateCameraShotId(value: unknown): Validated<string> {
-  if (typeof value !== 'string' || value.length === 0) {
-    return invalid('カットIDが指定されていません。');
-  }
-  if (!CAMERA_SHOT_ID.test(value)) {
-    return invalid('カットIDの形式が不正です。');
-  }
-  return { ok: true, value };
-}
+export const validateCameraShotId = createIdValidator(CAMERA_SHOT_ID, 'カットID');
 
 /**
  * カメラIDの検証。

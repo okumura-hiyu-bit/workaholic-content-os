@@ -3,7 +3,6 @@
  * ★Rendererを信用しない。fs には触らない純粋な構造検証だけを行う。
  */
 
-import { DESKTOP_ERROR_CODES, safeError } from './errors.ts';
 import {
   isAssetRoleId,
   SPEAKER_SLOTS,
@@ -13,7 +12,7 @@ import {
   type SpeakerSlot,
   type UpdateAssetRequest,
 } from './setup-dto.ts';
-import { validateExpectedUpdatedAt } from './validate-common.ts';
+import { invalid, validateExpectedUpdatedAt } from './validate-common.ts';
 import type { Validated } from './validate.ts';
 import { validateProjectPath } from './validate.ts';
 
@@ -24,16 +23,6 @@ export const MAX_SPEAKER_NAME_LENGTH = 40;
 
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 const ASSET_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
-
-function invalid(userMessage: string, suggestedAction?: string): Validated<never> {
-  return {
-    ok: false,
-    error: safeError(DESKTOP_ERROR_CODES.INVALID_REQUEST, userMessage, {
-      recoverable: true,
-      ...(suggestedAction !== undefined ? { suggestedAction } : {}),
-    }),
-  };
-}
 
 /**
  * 名前に使えない文字を弾く。

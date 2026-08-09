@@ -127,6 +127,29 @@ export function validateMultiLineText(
   return { ok: true, value: normalized };
 }
 
+/**
+ * 「正規表現に合うIDか」を確かめる検証関数を作る。
+ *
+ * ★4画面のID検証（字幕・ショート・カメラ・マーカー）が同じ形だったので
+ * ファクトリにまとめた。**IDの形そのものは種別ごとに違う**ので共有しない
+ * （字幕は `sub-<時刻>`、ショートは `short_NN`、カメラは `shot-<時刻>`、
+ * マーカーは2系統）。共有するのは「未指定を弾き、形式外を弾く」枠だけ。
+ */
+export function createIdValidator(
+  pattern: RegExp,
+  label: string,
+): (value: unknown) => Validated<string> {
+  return (value: unknown) => {
+    if (typeof value !== 'string' || value.length === 0) {
+      return invalid(`${label}が指定されていません。`);
+    }
+    if (!pattern.test(value)) {
+      return invalid(`${label}の形式が不正です。`);
+    }
+    return { ok: true, value };
+  };
+}
+
 /** 競合更新のエラー。文言は画面にそのまま出す。 */
 export function conflictError(): SafePipelineError {
   return safeError(

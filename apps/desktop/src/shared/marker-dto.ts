@@ -26,6 +26,7 @@
  */
 
 import type { ProjectSummary, SafePipelineError } from './dto.ts';
+import type { ReviewExportRequest, ReviewExportResult, ReviewMedia } from './review-dto.ts';
 
 // ─── 読み取り ──────────────────────────────────────────
 
@@ -141,12 +142,8 @@ export interface MarkerData {
   /** 実際に存在する種別と件数（画面の絞り込み用）。 */
   kinds: MarkerKindCount[];
   orphaned: MarkerOrphanedEdit[];
-  /** 再生用プレビュー。字幕Reviewと同じものを使い回す。 */
-  media?: {
-    url: string;
-    durationSec: number;
-    sourceFileName: string;
-  };
+  /** 再生用プレビュー。★4画面で同じ型（`review-dto.ts` の `ReviewMedia`）。 */
+  media?: ReviewMedia;
   /**
    * ★常時表示する注意書き。Main が本文を持ち、Renderer のフラグで消せない。
    * マーカー修正が反映される成果物は FCP7 XML だけであることを示す。
@@ -228,9 +225,11 @@ export type SaveMarkerEditResult =
 
 // ─── 再出力 ────────────────────────────────────────────
 
-export interface MarkerExportRequest {
-  projectPath: string;
-}
+/**
+ * 再出力のリクエスト。★4画面で同じ形なので `ReviewExportRequest` を使う
+ * （画面ごとの別名として残すのは、呼び出し側の読みやすさのため）。
+ */
+export type MarkerExportRequest = ReviewExportRequest;
 
 /**
  * 再出力は既存の部分実行に乗せる。
@@ -238,6 +237,4 @@ export interface MarkerExportRequest {
  * ★`generate-premiere-xml` は**必須**。マーカー修正が反映される成果物は
  * FCP7 XML だけで、`save-artifacts` は `analysis.markers` の件数しか使わない。
  */
-export type MarkerExportResult =
-  | { ok: true; runId: string; steps: string[] }
-  | { ok: false; error: SafePipelineError };
+export type MarkerExportResult = ReviewExportResult;

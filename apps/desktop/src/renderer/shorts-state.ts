@@ -10,6 +10,12 @@
  */
 
 import type { SafePipelineError } from '../shared/dto.ts';
+import {
+  canExportBase,
+  isSavablePhase,
+  type ReviewPhaseBase,
+  type ReviewStateBase,
+} from './review-shared.tsx';
 import type {
   ShortAdoption,
   ShortCandidateItem,
@@ -17,16 +23,8 @@ import type {
   ShortsData,
 } from '../shared/shorts-dto.ts';
 
-export type ShortsPhase =
-  | 'loading'
-  | 'ready'
-  | 'dirty'
-  | 'saving'
-  | 'saved'
-  | 'conflict'
-  | 'export-running'
-  | 'export-complete'
-  | 'failed';
+/** ★4画面共通（`review-shared.tsx` の `ReviewPhaseBase`）。名前だけ画面側に残す。 */
+export type ShortsPhase = ReviewPhaseBase;
 
 /** 一覧の絞り込み。判断済みが増えると未判断が埋もれるため。 */
 export type ShortsFilter = 'all' | 'adopted' | 'rejected' | 'undecided';
@@ -42,23 +40,16 @@ export interface ShortsDraft {
   note: string;
 }
 
-export interface ShortsState {
-  phase: ShortsPhase;
+/**
+ * ★共通フィールドは `ReviewStateBase` から継承する。
+ * ここに書くのはショート候補Review固有のものだけ。
+ */
+export interface ShortsState extends ReviewStateBase {
   data?: ShortsData;
-  /** 競合更新の検出に使う。保存のたびに更新する。 */
-  updatedAt?: string;
   /** 選択中の候補（IDではなく位置で持つ。一覧の並びと対応させるため）。 */
   selectedIndex?: number;
   draft?: ShortsDraft;
-  /** 未保存の変更があるか。 */
-  dirty: boolean;
   filter: ShortsFilter;
-  /** 再出力の実行ID。 */
-  exportRunId?: string;
-  /** 再生位置（秒）。 */
-  playheadSec: number;
-  error?: SafePipelineError;
-  lastSavedAt?: string;
 }
 
 export type ShortsAction =
@@ -91,26 +82,15 @@ export const initialShortsState: ShortsState = {
 
 /** 保存できる状態か。★連打・二重保存を止める唯一の判定。 */
 export function canSave(state: ShortsState): boolean {
-  return (
-    state.dirty &&
-    state.draft !== undefined &&
-    state.phase !== 'saving' &&
-    state.phase !== 'conflict' &&
-    state.phase !== 'export-running' &&
-    state.phase !== 'loading'
-  );
+  return state.dirty && state.draft !== undefined && isSavablePhase(state);
 }
 
-/** 再出力を始められるか。★実行中の再実行を止める。 */
+/**
+ * 再出力を始められるか。★実行中の再実行を止める。
+ * 判定は4画面共通（`review-shared.tsx` の `canExportBase`）。
+ */
 export function canExport(state: ShortsState): boolean {
-  return (
-    state.data !== undefined &&
-    !state.dirty &&
-    state.phase !== 'saving' &&
-    state.phase !== 'export-running' &&
-    state.phase !== 'conflict' &&
-    state.phase !== 'loading'
-  );
+  return canExportBase(state);
 }
 
 /** 候補から下書きの初期値を作る。未設定の項目は空文字で扱う。 */
