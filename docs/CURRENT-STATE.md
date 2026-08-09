@@ -1,8 +1,8 @@
 # CURRENT STATE — 引き継ぎドキュメント
 
-> 作成日: 2026-07-30 / 最終更新: 2026-08-05（Step 1「土台整理」、Step 2「Electron骨組み + IPC」、Step 3「確認画面：字幕」、Step 4「字幕ID重複の解消」、Step 5「プロジェクト一覧・新規作成・素材登録」、Step 6「確認画面：ショート候補」、Step 7「確認画面：カメラ切替」、Step 8「確認画面：マーカー」を反映）。この内容は会話の要約ではなく、**実際のリポジトリ・テスト結果・型チェック結果を根拠に**作成しています。数値は必ず次回セッション側でも再確認してください（本ファイル末尾のコマンド）。
+> 作成日: 2026-07-30 / 最終更新: 2026-08-09（Step 1「土台整理」、Step 2「Electron骨組み + IPC」、Step 3「確認画面：字幕」、Step 4「字幕ID重複の解消」、Step 5「プロジェクト一覧・新規作成・素材登録」、Step 6「確認画面：ショート候補」、Step 7「確認画面：カメラ切替」、Step 8「確認画面：マーカー」、Step 9「共通化リファクタリング」を反映）。この内容は会話の要約ではなく、**実際のリポジトリ・テスト結果・型チェック結果を根拠に**作成しています。数値は必ず次回セッション側でも再確認してください（本ファイル末尾のコマンド）。
 >
-> **Step 1〜8はすべてコミット済み**（最新: `040822c`）。ワーキングツリーに未コミットの実装は残っていません。
+> **Step 1〜9はすべてコミット済み**（最新: `87d7b82`）。ワーキングツリーに未コミットの実装は残っていません。
 > リポジトリはブランチ `main`、リモート `origin`（https://github.com/okumura-hiyu-bit/workaholic-content-os）へpush済みです。
 > テストは **48ファイル / 1372件** 全pass、型チェック エラー0件、ビルド成功。
 
@@ -945,14 +945,30 @@ Electron GUIの前提となる構成の整理を実施済み。**ロジックの
 
 コミット：`040822c feat: add marker review with volatile-id and kind-mismatch detection`（21ファイル / +4379行 −37行）
 
+### 完了済み：Step 9 — 共通化リファクタリング（2026-08-09）
+
+4画面（字幕・ショート候補・カメラ切替・マーカー）の重複を2ファイルに集約した。**`packages/*` は1ファイルも変更していない**。**テストは1件も追加・変更していない**（挙動を変えていないことの担保）。
+
+- 新規 `main/review-common.ts`（169行）… 組み立て・保存の共通部品
+- 新規 `renderer/review-shared.tsx`（297行）… 状態・表示部品・Hook
+- **★挙動を1つも変えていない。** 返す値・エラーコード・文言・クラス名・状態遷移は移設前と1文字も同じ
+- 集約した主な重複：`summaryOf`（4→1）/ `analysisNotReady`（4→1）/ `loadProject` の try/catch（8→1）/ 保存＋読み直し（4→1）/ ID検証（4→ファクトリ）/ 再出力IPCハンドラ（4→1）/ `SaveBadge`（4→1）/ 再生エリア・再生操作（4→1）/ 完了イベントの購読（4→1）/ `canExport`（4→1）/ 保存可能フェーズ判定（5→1）/ 状態の共通フィールドとフェーズunion（4→1）
+- **★共通化しなかったもの（意図的）**：`persistAndReload` の結果の組み立て（1要素返却3画面 対 並び全体返却のカメラ＝Step 8 で決めた2系統の分割を維持）、各画面固有の検出ロジック、カメラ固有の `previewIssues` / `canInsert` / 重なりを理由に再出力を止める判定、State の `data`（画面ごとに型が違う）
+- **★型の保証を落としていない。** 共通関数化で絞り込みが効かなくなる箇所を `!` で黙らせず、`loadForSave` は確かめた `analysis` を `project` と別フィールドで返す（参照はそのまま。詰め直すと保存対象が別オブジェクトになる）。`canExport` は `data` の有無を先に確かめる
+- **★参照の安定性を移設前と揃えた。** `useReviewMedia` は戻り値を `useMemo`、`setMediaUrl` は useState のセッターそのもの。各画面は `setMediaUrl` / `seek` を分割代入して依存配列に入れており、依存配列が実態と一致している
+- 検証：48ファイル / 1372件 全pass（**Step 8 と同数**）、型チェック エラー0件、ビルド成功、`git diff --check` clean、`selfcheck` 全12項目合格（xmllint によるXML妥当性・SRT出力を含む）
+- `shared/ipc.ts` と `preload/` は**無変更** → 公開API36個（invoke 34 + event 2）維持
+- 成果物（XML・SRT・CSV）の生成は `packages/editing` と `packages/pipeline` に閉じており `apps/desktop` 側に該当なし。その `packages/` が無変更のため成果物は一致する（`report.html` の生成日時のみ既存仕様で差分あり）
+
+コミット：`87d7b82 refactor: extract shared review building blocks without behavior change`（25ファイル / +903行 −1222行 ＝ 正味 −319行）
+
 ### 次の実装
 
-1. **★共通化のリファクタリング**（下の「10. 今後のリファクタリング候補」。**4画面が出そろい、共通項が確定した**。別フェーズ・別コミットで実施する方針）
-2. **孤立修正の再接続UI**（現在は一覧表示のみ。「この修正をこの要素に付け直す」操作はまだ無い。★4画面すべてで孤立が起こるので、共通の画面として作るのが自然）
-3. 書き出し画面
-4. AI設定（ローカルモードで配線 → GeminiProvider）
+1. **孤立修正の再接続UI**（現在は一覧表示のみ。「この修正をこの要素に付け直す」操作はまだ無い。★4画面すべてで孤立が起こるので、共通の画面として作るのが自然。Step 9 で `review-shared.tsx` ができたので、そこに置ける）
+2. 書き出し画面
+3. AI設定（ローカルモードで配線 → GeminiProvider）
 
-※「プロジェクト一覧・素材登録画面」はStep 5、「ショート候補の採否」はStep 6、「カメラ切替の修正」はStep 7で実装済み。
+※「プロジェクト一覧・素材登録画面」はStep 5、「ショート候補の採否」はStep 6、「カメラ切替の修正」はStep 7、「マーカー」はStep 8、「共通化」はStep 9で実装済み。
 
 **★保留中の課題**
 
@@ -969,7 +985,7 @@ Electron GUIの前提となる構成の整理を実施済み。**ロジックの
 |---|---|
 | ブランチ | `main` |
 | リモート | `origin` → https://github.com/okumura-hiyu-bit/workaholic-content-os |
-| 最新コミット | `7e37d07`（Step 6。push済み） |
+| 最新コミット | `87d7b82`（Step 9。push済み） |
 
 ただし**親ディレクトリ `Cloude Code ファイル/` 自体も別のgitリポジトリ**（ブランチ `main`・コミット0件）になっており、リポジトリが入れ子になっている。**親も `main` なので `git branch` の表示だけでは見分けられない。** gitコマンドを打つ前に、必ず `workaholic-content-os/` に `cd` し、`git rev-parse --show-toplevel` で対象リポジトリを確かめること。特に `git add -A` は親リポジトリで実行すると `node_modules/` や `.venv/`、ホーム配下のファイルまで巻き込むため、**必ずパスを明示してステージする**こと。
 
@@ -981,7 +997,9 @@ cd "/Users/kishimototaishi/Desktop/Cloude Code ファイル/workaholic-content-o
 git status
 git log --oneline -5
 git diff --stat
-# → 2026-08-05 時点の最新コミット（新しい順）：
+# → 2026-08-09 時点の最新コミット（新しい順）：
+#   87d7b82 refactor: extract shared review building blocks without behavior change ← Step 9
+#   f4f15ae docs: record Step 8 commit id
 #   040822c feat: add marker review with volatile-id and kind-mismatch detection ← Step 8
 #   89830b9 docs: record Step 7 commit id
 #   4fa9f8d feat: add camera shot review with timeline-safe editing  ← Step 7
@@ -1061,7 +1079,12 @@ npm run selfcheck
 
 Step 8 完了時点（2026-08-05）の状況。**★4画面（字幕・ショート・カメラ・マーカー）が出そろい、共通項が確定した。次フェーズで実施する。**
 
-### ★共通化フェーズ（Step 9）の進め方 — 着手前に必ず読むこと
+> **【2026-08-09 追記】この節の「共通化フェーズ（Step 9）」は `87d7b82` で実施済み。**
+> 以下の方針（独立コミット・機能追加と混ぜない・`persistAndReload` の2系統分割）は
+> すべてそのまま守られている。**設計の根拠として残すが、再実施はしないこと。**
+> 実際に何をどこへ集約したかは「7. 実装の進捗」の「完了済み：Step 9」を参照。
+
+### ★共通化フェーズ（Step 9）の進め方 — 着手前に必ず読むこと（★実施済み）
 
 **1. 共通化は Step 9 として独立したコミットで実施する。**
 Step 1〜8 のように「機能を作るついでに整理する」形にはしない。共通化だけを行うコミットを切る。
