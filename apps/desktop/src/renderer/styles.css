@@ -941,3 +941,24 @@ body {
   flex-wrap: wrap;
   margin: 10px 0 4px;
 }
+
+/* ─── 復旧（Recovery） ─── */
+
+/* 対象・種別の2行になるので、行の先頭に何の絞り込みかを出す */
+.filters__label {
+  align-self: center;
+  margin-right: 4px;
+  font-size: 12px;
+  color: var(--gray-600);
+}
+
+/* 一覧は「時刻 / 内容」の2列。4ドメインを同じ形で並べる */
+.recovery__list .cues__button {
+  grid-template-columns: 190px 1fr;
+}
+
+/* 付け替え先が埋まっている候補は選べないことを見た目でも示す */
+.recovery__targets .cues__button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}

@@ -16,6 +16,7 @@ import { STEP_LABELS } from '../shared/steps.ts';
 import { formatDateTime, formatElapsed, percent, shortenPath } from './format.ts';
 import { CameraScreen } from './CameraScreen.tsx';
 import { MarkerScreen } from './MarkerScreen.tsx';
+import { RecoveryScreen } from './RecoveryScreen.tsx';
 import { ReviewScreen } from './ReviewScreen.tsx';
 import { SetupScreen } from './SetupScreen.tsx';
 import { ShortsScreen } from './ShortsScreen.tsx';
@@ -45,7 +46,7 @@ export function App(): JSX.Element {
   const [now, setNow] = useState(() => Date.now());
   // 画面の切り替え。入口は一覧（setup）。
   const [screen, setScreen] = useState<
-    'setup' | 'pipeline' | 'review' | 'shorts' | 'camera' | 'marker'
+    'setup' | 'pipeline' | 'review' | 'shorts' | 'camera' | 'marker' | 'recovery'
   >('setup');
 
   // ★購読は1回だけ。解除関数をクリーンアップで必ず呼ぶ。
@@ -126,6 +127,11 @@ export function App(): JSX.Element {
               dispatch({ type: 'selection/succeeded', summary });
               setScreen('pipeline');
             }}
+          />
+        ) : screen === 'recovery' && state.summary !== undefined ? (
+          <RecoveryScreen
+            summary={state.summary}
+            onBack={() => setScreen('pipeline')}
           />
         ) : screen === 'marker' && state.summary !== undefined ? (
           <MarkerScreen
@@ -262,6 +268,15 @@ export function App(): JSX.Element {
                   onClick={() => setScreen('marker')}
                 >
                   マーカーを確認
+                </button>
+              )}
+              {state.phase !== 'running' && (
+                <button
+                  type="button"
+                  className="btn btn--secondary"
+                  onClick={() => setScreen('recovery')}
+                >
+                  要確認をまとめて見る
                 </button>
               )}
               {state.phase === 'running' && (

@@ -412,6 +412,19 @@ function wire(window: BrowserWindow): RunManager {
     handlers.markerExport(request),
   );
 
+  ipcMain.handle(IPC.recoveryLoad, (_e, path: unknown) =>
+    handlers.recoveryLoad(path),
+  );
+  ipcMain.handle(IPC.recoveryTargets, (_e, request: unknown) =>
+    handlers.recoveryTargets(request),
+  );
+  ipcMain.handle(IPC.recoveryReattach, (_e, request: unknown) =>
+    handlers.recoveryReattach(request),
+  );
+  ipcMain.handle(IPC.recoveryDiscard, (_e, request: unknown) =>
+    handlers.recoveryDiscard(request),
+  );
+
   ipcMain.handle(IPC.listProjects, () => handlers.listProjects());
   ipcMain.handle(IPC.createProject, (_e, request: unknown) =>
     handlers.createProject(request),

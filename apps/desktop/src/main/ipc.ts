@@ -67,6 +67,22 @@ import {
   deleteMarker,
   removeMarkerEdit,
 } from './marker.ts';
+import type {
+  RecoveryLoadResult,
+  RecoverySaveResult,
+  RecoveryTargetsResult,
+} from '../shared/recovery-dto.ts';
+import {
+  validateRecoveryDiscardRequest,
+  validateRecoveryReattachRequest,
+  validateRecoveryTargetsRequest,
+} from '../shared/recovery-validate.ts';
+import {
+  buildRecoveryData,
+  discardRecoveryEdit,
+  listRecoveryTargets,
+  reattachRecoveryEdit,
+} from './recovery.ts';
 import {
   applyCameraShotEdit,
   buildCameraData,
@@ -243,6 +259,11 @@ export interface IpcHandlers {
   markerDelete(rawRequest: unknown): Promise<SaveMarkerEditResult>;
   markerRemoveEdit(rawRequest: unknown): Promise<SaveMarkerEditResult>;
   markerExport(rawRequest: unknown): Promise<MarkerExportResult>;
+
+  recoveryLoad(rawPath: unknown): Promise<RecoveryLoadResult>;
+  recoveryTargets(rawRequest: unknown): Promise<RecoveryTargetsResult>;
+  recoveryReattach(rawRequest: unknown): Promise<RecoverySaveResult>;
+  recoveryDiscard(rawRequest: unknown): Promise<RecoverySaveResult>;
 
   listProjects(): Promise<ProjectListResult>;
   createProject(rawRequest: unknown): Promise<CreateProjectResult>;
@@ -617,6 +638,49 @@ export function createIpcHandlers(deps: IpcDeps): IpcHandlers {
     },
 
     markerExport: createExportHandler(MARKER_EXPORT_STEPS),
+
+    // ─── 復旧（4画面横断の要確認） ───────────────────────
+
+    async recoveryLoad(rawPath) {
+      const path = validateProjectPath(rawPath);
+      if (!path.ok) return { ok: false, error: path.error };
+      const summary = readProjectSummary(path.value, deps);
+      if (!summary.ok) return { ok: false, error: summary.error };
+      return buildRecoveryData(summary.summary.projectPath, deps.review);
+    },
+
+    async recoveryTargets(rawRequest) {
+      const validated = validateRecoveryTargetsRequest(rawRequest);
+      if (!validated.ok) return { ok: false, error: validated.error };
+      const summary = readProjectSummary(validated.value.projectPath, deps);
+      if (!summary.ok) return { ok: false, error: summary.error };
+      return listRecoveryTargets(
+        { ...validated.value, projectPath: summary.summary.projectPath },
+        deps.review,
+      );
+    },
+
+    async recoveryReattach(rawRequest) {
+      const validated = validateRecoveryReattachRequest(rawRequest);
+      if (!validated.ok) return { ok: false, error: validated.error };
+      const summary = readProjectSummary(validated.value.projectPath, deps);
+      if (!summary.ok) return { ok: false, error: summary.error };
+      return reattachRecoveryEdit(
+        { ...validated.value, projectPath: summary.summary.projectPath },
+        deps.review,
+      );
+    },
+
+    async recoveryDiscard(rawRequest) {
+      const validated = validateRecoveryDiscardRequest(rawRequest);
+      if (!validated.ok) return { ok: false, error: validated.error };
+      const summary = readProjectSummary(validated.value.projectPath, deps);
+      if (!summary.ok) return { ok: false, error: summary.error };
+      return discardRecoveryEdit(
+        { ...validated.value, projectPath: summary.summary.projectPath },
+        deps.review,
+      );
+    },
 
     // ─── プロジェクト一覧・新規作成・素材登録 ─────────────
 

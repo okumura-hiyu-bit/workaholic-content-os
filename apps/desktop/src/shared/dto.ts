@@ -59,6 +59,14 @@ import type {
   SaveSubtitleEditResult,
   UpdateSubtitleEditRequest,
 } from './review-dto.ts';
+import type {
+  RecoveryDiscardRequest,
+  RecoveryLoadResult,
+  RecoveryReattachRequest,
+  RecoverySaveResult,
+  RecoveryTargetsRequest,
+  RecoveryTargetsResult,
+} from './recovery-dto.ts';
 
 // ─── エラー ────────────────────────────────────────────
 
@@ -229,6 +237,15 @@ export interface ContentOsDesktopApi {
   markerDelete(request: DeleteMarkerRequest): Promise<SaveMarkerEditResult>;
   markerRemoveEdit(request: RemoveMarkerEditRequest): Promise<SaveMarkerEditResult>;
   markerExport(request: MarkerExportRequest): Promise<MarkerExportResult>;
+
+  /**
+   * 復旧（Recovery）。4画面を横断した「要確認」の一覧と、付け替え・破棄。
+   * ★再出力は持たない（責務は修復まで。書き出しは各Review画面）。
+   */
+  recoveryLoad(projectPath: string): Promise<RecoveryLoadResult>;
+  recoveryTargets(request: RecoveryTargetsRequest): Promise<RecoveryTargetsResult>;
+  recoveryReattach(request: RecoveryReattachRequest): Promise<RecoverySaveResult>;
+  recoveryDiscard(request: RecoveryDiscardRequest): Promise<RecoverySaveResult>;
 
   /** プロジェクト一覧・新規作成・素材登録。 */
   listProjects(): Promise<ProjectListResult>;

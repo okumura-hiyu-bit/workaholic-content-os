@@ -41,6 +41,15 @@ export const IPC = {
   markerRemoveEdit: 'contentos:marker:remove-edit',
   markerExport: 'contentos:marker:export',
 
+  /**
+   * 復旧（Recovery）。4画面を横断した「要確認」の一覧と、付け替え・破棄。
+   * ★再出力は持たない（責務は修復まで。書き出しは各Review画面）。
+   */
+  recoveryLoad: 'contentos:recovery:load',
+  recoveryTargets: 'contentos:recovery:targets',
+  recoveryReattach: 'contentos:recovery:reattach',
+  recoveryDiscard: 'contentos:recovery:discard',
+
   /** プロジェクト一覧・新規作成・素材登録。 */
   listProjects: 'contentos:setup:list',
   createProject: 'contentos:setup:create',
@@ -86,6 +95,10 @@ export const INVOKE_CHANNELS = [
   IPC.markerDelete,
   IPC.markerRemoveEdit,
   IPC.markerExport,
+  IPC.recoveryLoad,
+  IPC.recoveryTargets,
+  IPC.recoveryReattach,
+  IPC.recoveryDiscard,
   IPC.listProjects,
   IPC.createProject,
   IPC.chooseParentDir,

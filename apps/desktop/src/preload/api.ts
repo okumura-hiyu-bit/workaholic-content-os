@@ -68,6 +68,14 @@ import type {
   SetupSaveResult,
   UpdateAssetRequest,
 } from '../shared/setup-dto.ts';
+import type {
+  RecoveryDiscardRequest,
+  RecoveryLoadResult,
+  RecoveryReattachRequest,
+  RecoverySaveResult,
+  RecoveryTargetsRequest,
+  RecoveryTargetsResult,
+} from '../shared/recovery-dto.ts';
 import { IPC } from '../shared/ipc.ts';
 
 /** ipcRenderer のうち、この層が使う部分だけ。 */
@@ -115,6 +123,10 @@ export const ALLOWED_API_KEYS = [
   'markerDelete',
   'markerRemoveEdit',
   'markerExport',
+  'recoveryLoad',
+  'recoveryTargets',
+  'recoveryReattach',
+  'recoveryDiscard',
   'listProjects',
   'createProject',
   'chooseParentDir',
@@ -270,6 +282,27 @@ export function createDesktopApi(ipc: IpcBridge): ContentOsDesktopApi {
 
     async markerExport(request: MarkerExportRequest) {
       return (await ipc.invoke(IPC.markerExport, request)) as MarkerExportResult;
+    },
+
+    // ─── 復旧（4画面横断の要確認） ───────────────────────
+
+    async recoveryLoad(projectPath: string) {
+      return (await ipc.invoke(IPC.recoveryLoad, projectPath)) as RecoveryLoadResult;
+    },
+
+    async recoveryTargets(request: RecoveryTargetsRequest) {
+      return (await ipc.invoke(
+        IPC.recoveryTargets,
+        request,
+      )) as RecoveryTargetsResult;
+    },
+
+    async recoveryReattach(request: RecoveryReattachRequest) {
+      return (await ipc.invoke(IPC.recoveryReattach, request)) as RecoverySaveResult;
+    },
+
+    async recoveryDiscard(request: RecoveryDiscardRequest) {
+      return (await ipc.invoke(IPC.recoveryDiscard, request)) as RecoverySaveResult;
     },
 
     // ─── プロジェクト一覧・新規作成・素材登録 ─────────────
