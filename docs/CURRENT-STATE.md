@@ -1,10 +1,10 @@
 # CURRENT STATE — 引き継ぎドキュメント
 
-> 作成日: 2026-07-30 / 最終更新: 2026-08-09（Step 1「土台整理」、Step 2「Electron骨組み + IPC」、Step 3「確認画面：字幕」、Step 4「字幕ID重複の解消」、Step 5「プロジェクト一覧・新規作成・素材登録」、Step 6「確認画面：ショート候補」、Step 7「確認画面：カメラ切替」、Step 8「確認画面：マーカー」、Step 9「共通化リファクタリング」を反映）。この内容は会話の要約ではなく、**実際のリポジトリ・テスト結果・型チェック結果を根拠に**作成しています。数値は必ず次回セッション側でも再確認してください（本ファイル末尾のコマンド）。
+> 作成日: 2026-07-30 / 最終更新: 2026-08-09（Step 1「土台整理」、Step 2「Electron骨組み + IPC」、Step 3「確認画面：字幕」、Step 4「字幕ID重複の解消」、Step 5「プロジェクト一覧・新規作成・素材登録」、Step 6「確認画面：ショート候補」、Step 7「確認画面：カメラ切替」、Step 8「確認画面：マーカー」、Step 9「共通化リファクタリング」、Step 10「復旧画面（Review Recovery）」を反映）。この内容は会話の要約ではなく、**実際のリポジトリ・テスト結果・型チェック結果を根拠に**作成しています。数値は必ず次回セッション側でも再確認してください（本ファイル末尾のコマンド）。
 >
-> **Step 1〜9はすべてコミット済み**（最新: `87d7b82`）。ワーキングツリーに未コミットの実装は残っていません。
+> **Step 1〜10はすべてコミット済み**（最新: `e95c8f1`）。ワーキングツリーに未コミットの実装は残っていません。
 > リポジトリはブランチ `main`、リモート `origin`（https://github.com/okumura-hiyu-bit/workaholic-content-os）へpush済みです。
-> テストは **48ファイル / 1372件** 全pass、型チェック エラー0件、ビルド成功。
+> テストは **52ファイル / 1455件** 全pass、型チェック エラー0件、ビルド成功。
 
 ---
 
@@ -625,7 +625,7 @@ Test Files  48 passed (48)
 - **workspace import 移行後（2026-08-01）に再確認した内容**：型チェック エラー0件、テスト 19ファイル/462件すべてpass（★当時の件数。移行前と同一で、移行がロジックを変えていないことの根拠。現在は48ファイル/1372件）、`npm run pipeline -- --help` が15工程を正常に列挙、`npm run build` 成功。加えて **`--experimental-strip-types` を付けない素の `node` で `dist/pipeline.js`・`dist/core.js` を読み込み、`runPipeline` の取得・15工程の確認・`createProject()`／`resolveProject()` の実行に成功**（＝Electronメインプロセスから解析を呼べることの前提条件を実証済み）。
 - **Electron実機確認（2026-08-01）**：`.selfcheck` のfixtureから作った実プロジェクト（5素材・40秒）に対して、**実際にElectronアプリを起動し、Chrome DevTools Protocol でRendererを操作して**以下を確認した。
   1. アプリ起動・ウィンドウ生成・Reactのマウント（未選択画面の描画）
-  2. `window.contentOs` が公開しているキーがちょうど7つ（`selectProject` / `readProjectSummary` / `startPipeline` / `cancelPipeline` / `openProjectFolder` / `onPipelineProgress` / `onPipelineFinished`）**※これは2026-08-01時点の記録。現在は36個**（Step 3で+5、Step 5で+9、Step 6で+4、Step 7で+6、Step 8で+5。最新の一覧は `preload/api.ts` の `ALLOWED_API_KEYS` が唯一の正）
+  2. `window.contentOs` が公開しているキーがちょうど7つ（`selectProject` / `readProjectSummary` / `startPipeline` / `cancelPipeline` / `openProjectFolder` / `onPipelineProgress` / `onPipelineFinished`）**※これは2026-08-01時点の記録。現在は40個**（Step 3で+5、Step 5で+9、Step 6で+4、Step 7で+6、Step 8で+5、Step 10で+4。最新の一覧は `preload/api.ts` の `ALLOWED_API_KEYS` が唯一の正）
   3. **Rendererから `window.require` / `window.process` / `window.module` / `window.ipcRenderer` がすべて `undefined`**（contextIsolation + sandbox が効いている）
   4. `readProjectSummary` が案件名・ID・パス・ステータス・素材数・最終更新を返す
   5. 不正入力の拒否：相対パス・未知の工程ID（`rm -rf /`）・不正なrunId（`../../etc/passwd`）がすべて `INVALID_REQUEST` で拒否され、解析プロセスは起動しない
@@ -797,6 +797,40 @@ Test Files  48 passed (48)
 
   **元素材（wide.mp4 / cam_A.mp4 / mic_A.wav）のMD5は全工程の前後で完全一致**（読むだけ）。
 
+- **復旧画面の実機確認（2026-08-09 / Step 10）**：合成素材（selfcheck fixture）を**実 ffmpeg・faster-whisper でフル解析**した実プロジェクト（字幕4・カメラ5カット・マーカー4・ショート候補1）に対し、5種10件の「要確認」を仕込んで確認した。
+
+  **(A) 一覧（4ドメイン × 5種）— すべて表示**
+  要確認10件（孤立4 / 繋ぎ直し3 / 種別またぎ1 / 区間変化1 / 解析変化1）、対象別に 字幕3・ショート2・カメラ2・マーカー3。**時刻順に並び**、時刻を持たない項目（CHECK系マーカー・ショート）だけが末尾に回る。絞り込みは対象・種別とも単独／重ね掛けの両方で正しく件数が変わる。
+
+  **(B) 付け替え（Reattach）— 4ドメインすべて成立**
+  - 字幕：`sub-00100000` → `sub-00033280`。`edits.subtitles` のキーが移り、孤立が消える
+  - ショート：`short_07` → `short_01`（IDに時刻が無くても成立）
+  - カメラ：`shot-00090000`（削除指定）→ `shot-00033690`。`deletedIds` の配列要素が差し替わる
+  - マーカー：`mk-CHECK-check-lowconf-9999` → `mk-TOPIC-00000000`（CHECK系も成立）
+  - **★埋まっている要素は候補一覧で「選択不可」になり押せない**（実際に字幕で1件、ショートで1件発生）。先客を押し出して新しい孤立を作らないことを実機で確認
+
+  **(C) 破棄（Discard）— 4ドメイン × 5種すべて成立**
+  10件すべてで `edits` から消え、一覧から消える。全件破棄すると **要確認0件**になり、「消せない項目」が残らない。
+
+  **(D) 戻る導線**
+  復旧画面 →「解析画面へ戻る」→ 解析画面 → 字幕／ショート／カメラ／マーカーの4画面へそれぞれ入って戻れることを確認。**既存4画面はすべて無傷**。
+
+  **(E) エラーケース**
+  - 画面を開いたまま外部で `project.json` が更新されると **`競合しています` バッジが出て、破棄・付け替えの両ボタンが押せなくなる**
+  - 検証層が拒否：対象が不正（`chapter`）／対象とIDの取り違え（マーカーに字幕ID）／`updatedAt` 無し／相対パス → いずれも `INVALID_REQUEST`
+  - 同一IDへの付け替え → 「付け替え先が元と同じです。」
+  - 存在しないプロジェクト → `INVALID_PROJECT`
+
+  **(F) 成果物（Recovery操作後の再出力）**
+  GUIで付け替え2件＋破棄1件を行ってから `generate-premiere-xml` / `save-artifacts` / `save-project` を再実行し、**成果物6点すべてが正しく再生成される**ことを確認した。FCP7 XML は **xmllint 妥当**で、付け替えたマーカーのコメント（`<comment>孤立したメモ</comment>`）が実際にXMLへ出ている。`subtitle.srt` は破棄した孤立修正が消え、残した修正が反映される。`shorts.csv` に採否とタイトルが出る。`youtube-chapters.txt` は変更なし（章を触っていないため）。**元素材のMD5は全操作の前後で完全一致**。
+
+  **★実機でしか出なかった不具合を3件見つけて直した**（テストは通っていた）
+  1. 繋ぎ直し項目に時刻を載せておらず、一覧が時刻順に並ばずその項目だけ再生位置へ飛べなかった
+  2. 判断を破棄したショートに「区間変化」が残り続けた（`rangeChanged` は追記のみの `edits.history` から算出されるため）。**破棄しても消えない項目**になっていた
+  3. 戻るボタンの文言が既存4画面と食い違っていた
+
+  **公開APIはちょうど40個**（Step 8の36個 + 復旧4個）。`window.require` / `window.process` / `window.ipcRenderer` はいずれも `undefined` のまま。
+
 ---
 
 ## 6. 未検証事項
@@ -962,13 +996,64 @@ Electron GUIの前提となる構成の整理を実施済み。**ロジックの
 
 コミット：`87d7b82 refactor: extract shared review building blocks without behavior change`（25ファイル / +903行 −1222行 ＝ 正味 −319行）
 
-### 次の実装
+### 完了済み：Step 10 — 復旧画面（Review Recovery）（2026-08-09）
 
-1. **孤立修正の再接続UI**（現在は一覧表示のみ。「この修正をこの要素に付け直す」操作はまだ無い。★4画面すべてで孤立が起こるので、共通の画面として作るのが自然。Step 9 で `review-shared.tsx` ができたので、そこに置ける）
-2. 書き出し画面
-3. AI設定（ローカルモードで配線 → GeminiProvider）
+4画面に散らばっていた「要確認」を1本の一覧にまとめ、**付け替え**と**破棄**をその場で行えるようにした。**`packages/*` は1ファイルも変更していない**。**既存4画面の Main・Renderer・状態遷移は1行も変更していない**（差分0行を確認済み）。
 
-※「プロジェクト一覧・素材登録画面」はStep 5、「ショート候補の採否」はStep 6、「カメラ切替の修正」はStep 7、「マーカー」はStep 8、「共通化」はStep 9で実装済み。
+**★中核となる実測**（設計前に `packages/core` を実際に動かして確認）
+`matchEdits` は**ID完全一致を時刻での再接続より先に**評価する。したがって `edits` のキーを実在IDへ移し替えるだけで、孤立した修正はその要素へ適用される（実測：orphaned 1→0、しかも `reattached` にも載らない＝「元からそのID宛」扱い）。付け替えはこの性質にだけ乗るので、凍結対象の `resolve.ts` に触れずに実装できる。自動再接続の許容範囲は **0.5秒ちょうどまで**（0.50→接続 / 0.51→孤立）。
+
+**★対象5種は「横断」ではなく偏在していた**（実測で判明）
+
+| 種別 | 字幕 | ショート | カメラ | マーカー |
+|---|:---:|:---:|:---:|:---:|
+| orphaned | ✓ | ✓ | ✓ | ✓ |
+| reattached | ✓（★従来未表示） | 原理的に不可 | ✓ | ✓ |
+| kindMismatch | — | — | — | ✓ |
+| rangeChanged | — | ✓ | — | — |
+| conflicted | ✓ | — | — | — |
+
+4画面共通なのは `orphaned` だけ。一覧の主軸をそこに置き、他は同じ枠へ流し込む形にした。
+
+- **★字幕の `reattached` を初めて可視化した。** `resolveProject` は字幕の繋ぎ直しも返しているが、`review.ts` は `ReattachedEditLike` を型宣言しているだけで一度も読んでいなかった。この画面では4ドメインを対称に扱うため `resolveProject` から直接作る（**既存の字幕画面の表示は変えていない**）。
+- **★不変条件：`RecoveryItem.sourceId` は常に `edits` 側のキー。** `matchEdits` は edits を書き換えないので、繋ぎ直された後も修正は古いキーのまま保存されている。5種すべてでこれが成り立つため、「破棄」を4ドメイン×5種で1つの処理に書けている。
+- **★責務は修復まで。再出力は持たない。** カメラ切替の整合性チェック（重なり・尺超過でXMLを壊さない）を迂回してしまうため、書き出しは各Review画面の責務のまま残す。
+- **★「確認済み」の記録は持たない。** 記録するには `packages/core` の `EditsLayer` に新フィールドが要り、変更禁止の資産に手を入れることになる。
+- **★Step 9 の共通部品をそのまま使い、追加は0件。** `SaveBadge` / `useReviewMedia` / `ReviewPlayer` / `usePipelineFinished` / `isSavablePhase` / `ReviewStateBase` / `loadForSave` / `saveAndRebuild` / `summaryOf` を無改造で流用。判定ロジックも写していない（4画面の `buildXxxData` を読むだけ。`timeFromId` も本体をそのまま使う）。
+
+**★実機確認で見つけて直した3点**（テストだけでは出なかった）
+
+1. 繋ぎ直し項目に時刻を載せていなかった。一覧が時刻順に並ばず、その項目だけ再生位置へ飛べなかった。
+2. 判断を破棄したショートに「区間変化」が残り続けた。`rangeChanged` は `edits.history` から算出され、履歴は追記のみで消えないため、**破棄しても消えない項目**になっていた。判断が残っているものだけ出すようにした。
+3. 戻るボタンの文言が既存4画面（「解析画面へ戻る」）と食い違っていた。
+
+新規：`shared/recovery-dto.ts` / `shared/recovery-validate.ts` / `main/recovery.ts` / `renderer/recovery-state.ts` / `renderer/RecoveryScreen.tsx`
+
+テスト83件を追加。合計 **52ファイル / 1455件 全pass**（既存1372件は無変更）。公開APIは4つ増えて **36 → 40**（invoke 38 + event 2）。
+
+コミット：`e95c8f1 feat: add cross-screen recovery for orphaned and reattached edits`（16ファイル / +3644行 −1行）
+
+### ★Step 11 の開始位置 — 書き出し画面
+
+**Step 10 までで「解析 → 確認 → 修正 → 復旧」が一巡した。** 残っているのは、できあがった成果物を編集者へ渡す出口。
+
+**なぜ次がここか**：現在、成果物（FCP7 XML・SRT3本・shorts.csv・youtube-chapters.txt・report.html）は `exports/` に書かれるだけで、**GUIからは所在も鮮度も分からない**。復旧画面で修正しても「どれを作り直せばよいか」は編集者の記憶頼りになっている。Step 10 が意図的に再出力を持たなかったぶん、ここが最後の空白になる。
+
+**着手前に読むこと**
+
+1. **成果物の一覧と鮮度**。`project.exports` に書き出し履歴がある（`packages/core` の `Project.exports`）。`edits.history` の最終更新と突き合わせれば「修正したのに再出力していない」を出せる。
+2. **再出力の工程はすでに Main が固定している**。`ipc.ts` の `REVIEW_EXPORT_STEPS` / `SHORTS_EXPORT_STEPS` / `CAMERA_EXPORT_STEPS` / `MARKER_EXPORT_STEPS` と、Step 9 の `createExportHandler` がそのまま使える。**書き出し画面のために新しい工程を作らないこと。**
+3. **★カメラの整合性チェックを迂回しないこと**。重なり・尺超過が残ったまま `generate-premiere-xml` を回すと Premiere プロジェクトが壊れる。`camera-state.ts` の `canExport` が持つ条件（`counts.overlaps === 0 && counts.outOfRange === 0`）を、書き出し画面でも必ず通す。
+4. **共通部品は Step 9 の `review-shared.tsx` と `review-common.ts` を使う**。Step 10 は追加0件で作れた。ここでも `ReviewStateBase` / `isSavablePhase` / `SaveBadge` / `usePipelineFinished` が効くはず。
+5. **`report.html` の生成日時だけは毎回変わる**（既存仕様）。成果物の同一性を比べるときはここを除外する。
+
+**保留中の課題との関係**：「話者修正が成果物に届いていない」（後述）は書き出し画面を作ると**目に見える形で露出する**。`save-artifacts.ts` の変更＝成果物の中身が変わるため、Premiere実機検証が終わるまでは着手しない方針は維持し、画面には「未対応」と明示するのが安全。
+
+### そのあと
+
+- AI設定（ローカルモードで配線 → GeminiProvider）
+
+※「プロジェクト一覧・素材登録画面」はStep 5、「ショート候補の採否」はStep 6、「カメラ切替の修正」はStep 7、「マーカー」はStep 8、「共通化」はStep 9、「復旧画面」はStep 10で実装済み。
 
 **★保留中の課題**
 
@@ -985,7 +1070,7 @@ Electron GUIの前提となる構成の整理を実施済み。**ロジックの
 |---|---|
 | ブランチ | `main` |
 | リモート | `origin` → https://github.com/okumura-hiyu-bit/workaholic-content-os |
-| 最新コミット | `87d7b82`（Step 9。push済み） |
+| 最新コミット | `e95c8f1`（Step 10。push済み） |
 
 ただし**親ディレクトリ `Cloude Code ファイル/` 自体も別のgitリポジトリ**（ブランチ `main`・コミット0件）になっており、リポジトリが入れ子になっている。**親も `main` なので `git branch` の表示だけでは見分けられない。** gitコマンドを打つ前に、必ず `workaholic-content-os/` に `cd` し、`git rev-parse --show-toplevel` で対象リポジトリを確かめること。特に `git add -A` は親リポジトリで実行すると `node_modules/` や `.venv/`、ホーム配下のファイルまで巻き込むため、**必ずパスを明示してステージする**こと。
 
@@ -998,6 +1083,8 @@ git status
 git log --oneline -5
 git diff --stat
 # → 2026-08-09 時点の最新コミット（新しい順）：
+#   e95c8f1 feat: add cross-screen recovery for orphaned and reattached edits ← Step 10
+#   aa97640 docs: record Step 9 commit id
 #   87d7b82 refactor: extract shared review building blocks without behavior change ← Step 9
 #   f4f15ae docs: record Step 8 commit id
 #   040822c feat: add marker review with volatile-id and kind-mismatch detection ← Step 8
